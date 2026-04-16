@@ -84,7 +84,7 @@ app.post('/api/login', async (req, res) => {
     try {
         // 2. Buscamos al usuario por su email en la base de datos
         const [usuarios] = await db.query('SELECT * FROM usuarios WHERE email = ?', [email]);
-        
+
         // Si no hay ningún usuario con ese email...
         if (usuarios.length === 0) {
             return res.status(401).json({ error: 'Email o contraseña incorrectos' });
@@ -101,7 +101,7 @@ app.post('/api/login', async (req, res) => {
 
         // 4. ¡Todo correcto! Creamos el Token (El Pasaporte)
         const token = jwt.sign(
-            { id: usuario.id }, 
+            { id: usuario.id },
             'MI_CLAVE_SECRETA_SUPER_SEGURA', // En el futuro esconderemos esto
             { expiresIn: '7d' } // El token durará 7 días
         );
@@ -160,13 +160,17 @@ app.get('/api/publicaciones', verificarToken, async (req, res) => {
         // La magia del JOIN: Unimos la tabla publicaciones (p) con usuarios (u)
         // Ordenamos por fecha descendente (DESC) para ver los más nuevos primero
         const query = `
-            SELECT p.id, p.contenido, p.fecha_creacion, u.username 
+            SELECT 
+                p.id, p.contenido, p.fecha_creacion, u.username,
+                (SELECT COUNT(*) FROM likes WHERE publicacion_id = p.id) AS total_likes,
+                (SELECT COUNT(*) FROM likes WHERE publicacion_id = p.id AND usuario_id = ?) AS le_has_dado_like
             FROM publicaciones p
             JOIN usuarios u ON p.usuario_id = u.id
             ORDER BY p.fecha_creacion DESC
         `;
         
-        const [publicaciones] = await db.query(query);
+        // ¡OJO! Ahora tenemos que pasarle el req.usuario.id a la consulta
+        const [publicaciones] = await db.query(query, [req.usuario.id]);
 
         // Devolvemos la lista de tweets como respuesta
         res.json(publicaciones);
@@ -174,5 +178,40 @@ app.get('/api/publicaciones', verificarToken, async (req, res) => {
     } catch (error) {
         console.error(error);
         res.status(500).json({ error: 'Error al cargar el feed' });
+    }
+});
+
+// ==========================================
+// RUTA: DAR O QUITAR LIKE (Protegida)
+// ==========================================
+app.post('/api/publicaciones/:id/like', verificarToken, async (req, res) => {
+    const publicacionId = req.params.id;
+    const usuarioId = req.usuario.id; // Lo sacamos del token gracias al Guardián
+
+    try {
+        // 1. Miramos si este usuario ya le dio like a esta publicación
+        const [likes] = await db.query(
+            'SELECT * FROM likes WHERE usuario_id = ? AND publicacion_id = ?',
+            [usuarioId, publicacionId]
+        );
+
+        if (likes.length > 0) {
+            // 2. Si ya le dio like, significa que quiere QUITARLO (Dislike)
+            await db.query(
+                'DELETE FROM likes WHERE usuario_id = ? AND publicacion_id = ?',
+                [usuarioId, publicacionId]
+            );
+            return res.json({ mensaje: 'Like quitado 💔', liked: false });
+        } else {
+            // 3. Si no tiene like, se lo PONEMOS
+            await db.query(
+                'INSERT INTO likes (usuario_id, publicacion_id) VALUES (?, ?)',
+                [usuarioId, publicacionId]
+            );
+            return res.json({ mensaje: 'Like añadido ❤️', liked: true });
+        }
+    } catch (error) {
+        console.error(error);
+        res.status(500).json({ error: 'Error al procesar el like' });
     }
 });
