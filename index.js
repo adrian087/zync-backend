@@ -163,7 +163,8 @@ app.get('/api/publicaciones', verificarToken, async (req, res) => {
             SELECT 
                 p.id, p.contenido, p.fecha_creacion, u.username,
                 (SELECT COUNT(*) FROM likes WHERE publicacion_id = p.id) AS total_likes,
-                (SELECT COUNT(*) FROM likes WHERE publicacion_id = p.id AND usuario_id = ?) AS le_has_dado_like
+                (SELECT COUNT(*) FROM likes WHERE publicacion_id = p.id AND usuario_id = ?) AS le_has_dado_like,
+                (SELECT COUNT(*) FROM comentarios WHERE publicacion_id = p.id) AS total_comentarios -- 👇 ¡NUEVA LÍNEA! 👇
             FROM publicaciones p
             JOIN usuarios u ON p.usuario_id = u.id
             ORDER BY p.fecha_creacion DESC
@@ -213,5 +214,119 @@ app.post('/api/publicaciones/:id/like', verificarToken, async (req, res) => {
     } catch (error) {
         console.error(error);
         res.status(500).json({ error: 'Error al procesar el like' });
+    }
+});
+
+// ==========================================
+// RUTA: MI PERFIL (Protegida)
+// ==========================================
+app.get('/api/perfil', verificarToken, async (req, res) => {
+    try {
+        const usuarioId = req.usuario.id;
+
+        // 1. Obtenemos el nombre de usuario
+        const [usuarioData] = await db.query(
+            'SELECT username FROM usuarios WHERE id = ?', 
+            [usuarioId]
+        );
+
+        // 2. Obtenemos SOLO las publicaciones de este usuario
+        const query = `
+            SELECT 
+                p.id, p.contenido, p.fecha_creacion, u.username,
+                (SELECT COUNT(*) FROM likes WHERE publicacion_id = p.id) AS total_likes,
+                (SELECT COUNT(*) FROM likes WHERE publicacion_id = p.id AND usuario_id = ?) AS le_has_dado_like
+            FROM publicaciones p
+            JOIN usuarios u ON p.usuario_id = u.id
+            WHERE p.usuario_id = ?
+            ORDER BY p.fecha_creacion DESC
+        `;
+        
+        // Pasamos usuarioId dos veces: una para el Like, otra para el WHERE
+        const [publicaciones] = await db.query(query, [usuarioId, usuarioId]);
+
+        // 3. Lo empaquetamos todo y lo enviamos
+        res.json({
+            username: usuarioData[0].username,
+            totalPosts: publicaciones.length,
+            publicaciones: publicaciones
+        });
+
+    } catch (error) {
+        console.error(error);
+        res.status(500).json({ error: 'Error al cargar el perfil' });
+    }
+});
+
+// ==========================================
+// RUTA: BORRAR PUBLICACIÓN (Protegida)
+// ==========================================
+app.delete('/api/publicaciones/:id', verificarToken, async (req, res) => {
+    const publicacionId = req.params.id;
+    const usuarioId = req.usuario.id; // Extraído del token por el Guardián
+
+    try {
+        // Ejecutamos el DELETE exigiendo que el usuario_id sea el nuestro
+        const [resultado] = await db.query(
+            'DELETE FROM publicaciones WHERE id = ? AND usuario_id = ?',
+            [publicacionId, usuarioId]
+        );
+
+        // Si affectedRows es 0, significa que el post no existía o NO ERA SUYO
+        if (resultado.affectedRows === 0) {
+            return res.status(403).json({ error: 'No autorizado para borrar esta publicación o no existe' });
+        }
+
+        res.json({ mensaje: 'Publicación eliminada correctamente 🗑️' });
+
+    } catch (error) {
+        console.error(error);
+        res.status(500).json({ error: 'Error al intentar borrar la publicación' });
+    }
+});
+
+// ==========================================
+// RUTA: CREAR UN COMENTARIO (Protegida)
+// ==========================================
+app.post('/api/publicaciones/:id/comentarios', verificarToken, async (req, res) => {
+    const publicacionId = req.params.id;
+    const usuarioId = req.usuario.id; // ¡Gracias Guardián!
+    const { contenido } = req.body;
+
+    if (!contenido) {
+        return res.status(400).json({ error: 'El comentario no puede estar vacío' });
+    }
+
+    try {
+        const [resultado] = await db.query(
+            'INSERT INTO comentarios (usuario_id, publicacion_id, contenido) VALUES (?, ?, ?)',
+            [usuarioId, publicacionId, contenido]
+        );
+        res.status(201).json({ mensaje: 'Comentario publicado 🚀', comentarioId: resultado.insertId });
+    } catch (error) {
+        console.error(error);
+        res.status(500).json({ error: 'Error al publicar el comentario' });
+    }
+});
+
+// ==========================================
+// RUTA: VER COMENTARIOS DE UNA PUBLICACIÓN (Protegida)
+// ==========================================
+app.get('/api/publicaciones/:id/comentarios', verificarToken, async (req, res) => {
+    const publicacionId = req.params.id;
+
+    try {
+        const query = `
+            SELECT c.id, c.contenido, c.fecha_creacion, u.username 
+            FROM comentarios c
+            JOIN usuarios u ON c.usuario_id = u.id
+            WHERE c.publicacion_id = ?
+            ORDER BY c.fecha_creacion ASC
+        `;
+        const [comentarios] = await db.query(query, [publicacionId]);
+        res.json(comentarios);
+    } catch (error) {
+        console.error(error);
+        res.status(500).json({ error: 'Error al cargar los comentarios' });
     }
 });
