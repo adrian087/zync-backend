@@ -384,3 +384,31 @@ app.get('/api/usuarios/:id', verificarToken, async (req, res) => {
         res.status(500).json({ error: 'Error al cargar perfil' });
     }
 });
+
+// ==========================================
+// RUTA: REGISTRO DE USUARIO
+// ==========================================
+app.post('/api/registro', async (req, res) => {
+    // 👇 Añadimos nombres y apellidos a la recolección de datos 👇
+    const { nombres, apellidos, username, email, password } = req.body;
+    
+    // Validamos que vengan todos los campos
+    if (!nombres || !apellidos || !username || !email || !password) {
+        return res.status(400).json({ error: 'Faltan datos obligatorios' });
+    }
+
+    try {
+        const salt = await bcrypt.genSalt(10);
+        const hashedPassword = await bcrypt.hash(password, salt);
+        
+        // 👇 Actualizamos la consulta SQL para insertar los 5 campos 👇
+        const query = 'INSERT INTO usuarios (nombres, apellidos, username, email, password) VALUES (?, ?, ?, ?, ?)';
+        const [resultado] = await db.query(query, [nombres, apellidos, username, email, hashedPassword]);
+        
+        res.status(201).json({ mensaje: 'Usuario registrado con éxito', usuarioId: resultado.insertId });
+    } catch (error) {
+        if (error.code === 'ER_DUP_ENTRY') return res.status(409).json({ error: 'El usuario o email ya está en uso' });
+        console.error(error);
+        res.status(500).json({ error: 'Error interno del servidor' });
+    }
+});

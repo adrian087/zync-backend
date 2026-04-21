@@ -4,7 +4,7 @@ const mysql = require('mysql2');
 const pool = mysql.createPool({
     host: 'localhost',
     user: 'root',
-    password: '', // Por defecto en Mac está vacío
+    password: '',
     database: 'red_social_db',
     waitForConnections: true,
     connectionLimit: 10,
