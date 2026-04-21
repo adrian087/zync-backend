@@ -33,7 +33,7 @@ app.get('/', (req, res) => {
 });
 
 app.listen(PORT, () => {
-    console.log(`✅ Servidor en http://localhost:${PORT}`);
+    console.log(`✅ Servidor en http://209.38.196.225:${PORT}`);
 });
 
 // ==========================================
@@ -108,8 +108,8 @@ app.get('/api/publicaciones', verificarToken, async (req, res) => {
         
         const formateadas = publicaciones.map(post => ({
             ...post,
-            imagen_url: post.imagen_url ? `http://localhost:3000${post.imagen_url}` : null,
-            avatar_url: post.avatar_url ? `http://localhost:3000${post.avatar_url}` : null
+            imagen_url: post.imagen_url ? `http://209.38.196.225:3000${post.imagen_url}` : null,
+            avatar_url: post.avatar_url ? `http://209.38.196.225:3000${post.avatar_url}` : null
         }));
         res.json(formateadas);
     } catch (error) {
@@ -155,14 +155,14 @@ app.get('/api/perfil', verificarToken, async (req, res) => {
         
         const formateadas = publicaciones.map(post => ({
             ...post,
-            imagen_url: post.imagen_url ? `http://localhost:3000${post.imagen_url}` : null,
-            avatar_url: post.avatar_url ? `http://localhost:3000${post.avatar_url}` : null
+            imagen_url: post.imagen_url ? `http://209.38.196.225:3000${post.imagen_url}` : null,
+            avatar_url: post.avatar_url ? `http://209.38.196.225:3000${post.avatar_url}` : null
         }));
 
         res.json({
             username: usuarioData[0].username,
             bio: usuarioData[0].bio,
-            avatar_url: usuarioData[0].avatar_url ? `http://localhost:3000${usuarioData[0].avatar_url}` : null,
+            avatar_url: usuarioData[0].avatar_url ? `http://209.38.196.225:3000${usuarioData[0].avatar_url}` : null,
             totalPosts: formateadas.length,
             publicaciones: formateadas
         });
@@ -204,7 +204,7 @@ app.put('/api/perfil/editar', verificarToken, upload.single('avatar'), async (re
         
         res.json({ 
             mensaje: 'Perfil actualizado correctamente',
-            avatar_url: avatarUrl ? `http://localhost:3000${avatarUrl}` : null
+            avatar_url: avatarUrl ? `http://209.38.196.225:3000${avatarUrl}` : null
         });
 
     } catch (error) {
@@ -248,7 +248,7 @@ app.get('/api/publicaciones/:id/comentarios', verificarToken, async (req, res) =
         
         const formateados = comentarios.map(com => ({
             ...com,
-            avatar_url: com.avatar_url ? `http://localhost:3000${com.avatar_url}` : null
+            avatar_url: com.avatar_url ? `http://209.38.196.225:3000${com.avatar_url}` : null
         }));
         res.json(formateados);
     } catch (error) {
@@ -263,7 +263,7 @@ app.get('/api/usuarios/buscar', verificarToken, async (req, res) => {
     try {
         const [usuarios] = await db.query('SELECT id, username, avatar_url FROM usuarios WHERE username LIKE ? LIMIT 15', [`%${termino}%`]);
         const formateados = usuarios.map(u => ({
-            ...u, avatar_url: u.avatar_url ? `http://localhost:3000${u.avatar_url}` : null
+            ...u, avatar_url: u.avatar_url ? `http://209.38.196.225:3000${u.avatar_url}` : null
         }));
         res.json(formateados);
     } catch (error) {
@@ -286,8 +286,8 @@ app.get('/api/publicaciones/buscar', verificarToken, async (req, res) => {
         const [publicaciones] = await db.query(query, [`%${termino}%`]);
         const formateadas = publicaciones.map(post => ({
             ...post,
-            imagen_url: post.imagen_url ? `http://localhost:3000${post.imagen_url}` : null,
-            avatar_url: post.avatar_url ? `http://localhost:3000${post.avatar_url}` : null
+            imagen_url: post.imagen_url ? `http://209.38.196.225:3000${post.imagen_url}` : null,
+            avatar_url: post.avatar_url ? `http://209.38.196.225:3000${post.avatar_url}` : null
         }));
         res.json(formateadas);
     } catch (error) {
@@ -330,8 +330,8 @@ app.get('/api/publicaciones/siguiendo', verificarToken, async (req, res) => {
         const [publicaciones] = await db.query(query, [miUsuarioId, miUsuarioId]);
         const formateadas = publicaciones.map(post => ({
             ...post,
-            imagen_url: post.imagen_url ? `http://localhost:3000${post.imagen_url}` : null,
-            avatar_url: post.avatar_url ? `http://localhost:3000${post.avatar_url}` : null
+            imagen_url: post.imagen_url ? `http://209.38.196.225:3000${post.imagen_url}` : null,
+            avatar_url: post.avatar_url ? `http://209.38.196.225:3000${post.avatar_url}` : null
         }));
         res.json(formateadas);
     } catch (error) {
@@ -368,14 +368,14 @@ app.get('/api/usuarios/:id', verificarToken, async (req, res) => {
 
         const formateadas = publicaciones.map(post => ({
             ...post,
-            imagen_url: post.imagen_url ? `http://localhost:3000${post.imagen_url}` : null,
-            avatar_url: post.avatar_url ? `http://localhost:3000${post.avatar_url}` : null
+            imagen_url: post.imagen_url ? `http://209.38.196.225:3000${post.imagen_url}` : null,
+            avatar_url: post.avatar_url ? `http://209.38.196.225:3000${post.avatar_url}` : null
         }));
 
         res.json({
             usuario: {
                 ...usuarioData[0],
-                avatar_url: usuarioData[0].avatar_url ? `http://localhost:3000${usuarioData[0].avatar_url}` : null
+                avatar_url: usuarioData[0].avatar_url ? `http://209.38.196.225:3000${usuarioData[0].avatar_url}` : null
             },
             le_sigo: leSigo,
             publicaciones: formateadas
