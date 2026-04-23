@@ -1,4 +1,6 @@
 const express = require('express');
+const http = require('http'); // 👈 NUEVO: Necesario para sockets
+const { Server } = require('socket.io'); // 👈 NUEVO: El motor de tiempo real
 const cors = require('cors');
 const db = require('./db');
 const bcrypt = require('bcrypt');
@@ -9,6 +11,13 @@ const multer = require('multer');
 const path = require('path');
 
 const app = express();
+// 👈 NUEVO: Envolvemos Express en un servidor HTTP para que soporte WebSockets
+const server = http.createServer(app); 
+// 👈 NUEVO: Creamos el túnel Socket.io abierto a todas las conexiones
+const io = new Server(server, {        
+    cors: { origin: '*' }
+});
+
 const PORT = 3000;
 
 app.use(cors());
@@ -28,11 +37,18 @@ const storage = multer.diskStorage({
 });
 const upload = multer({ storage: storage });
 
+// 👇 NUEVO: Detectar cuándo alguien entra o sale del túnel
+io.on('connection', (socket) => {
+    console.log('🔌 Un usuario se ha conectado al túnel de Zync');
+    socket.on('disconnect', () => console.log('🔌 Usuario desconectado del túnel'));
+});
+
 app.get('/', (req, res) => {
     res.json({ mensaje: 'Servidor funcionando y conectado 🚀' });
 });
 
-app.listen(PORT, () => {
+// 👇 OJO AQUÍ: Ahora usamos server.listen en lugar de app.listen 👇
+server.listen(PORT, () => {
     console.log(`✅ Servidor en http://209.38.196.225:${PORT}`);
 });
 
@@ -135,20 +151,33 @@ app.get('/api/publicaciones', verificarToken, async (req, res) => {
 });
 
 // ==========================================
-// RUTA: DAR LIKE
+// RUTA: DAR LIKE (👇 MAGIA DE SOCKET.IO AÑADIDA 👇)
 // ==========================================
 app.post('/api/publicaciones/:id/like', verificarToken, async (req, res) => {
     const publicacionId = req.params.id;
     const usuarioId = req.usuario.id;
     try {
+        let liked = false;
         const [likes] = await db.query('SELECT * FROM likes WHERE usuario_id = ? AND publicacion_id = ?', [usuarioId, publicacionId]);
+        
         if (likes.length > 0) {
             await db.query('DELETE FROM likes WHERE usuario_id = ? AND publicacion_id = ?', [usuarioId, publicacionId]);
-            return res.json({ mensaje: 'Like quitado 💔', liked: false });
         } else {
             await db.query('INSERT INTO likes (usuario_id, publicacion_id) VALUES (?, ?)', [usuarioId, publicacionId]);
-            return res.json({ mensaje: 'Like añadido ❤️', liked: true });
+            liked = true;
         }
+
+        // Calculamos cuántos likes hay ahora en total en esa publicación
+        const [likesCount] = await db.query('SELECT COUNT(*) as total FROM likes WHERE publicacion_id = ?', [publicacionId]);
+        const totalLikes = likesCount[0].total;
+
+        // 📢 ¡GRITAMOS POR EL TÚNEL! Avisamos a TODOS los móviles conectados que el contador ha cambiado
+        io.emit('actualizacion_like', {
+            publicacionId: parseInt(publicacionId),
+            total_likes: totalLikes
+        });
+
+        return res.json({ mensaje: liked ? 'Like añadido ❤️' : 'Like quitado 💔', liked });
     } catch (error) {
         res.status(500).json({ error: 'Error al dar like' });
     }
