@@ -404,15 +404,19 @@ app.get('/api/publicaciones/siguiendo', verificarToken, async (req, res) => {
     try {
         const miUsuarioId = req.usuario.id;
         const query = `
-            SELECT 
-                p.id, p.usuario_id, p.contenido, p.imagen_url, p.fecha_creacion, u.username, u.avatar_url,
-                (SELECT COUNT(*) FROM likes WHERE publicacion_id = p.id) AS total_likes,
-                (SELECT COUNT(*) FROM likes WHERE publicacion_id = p.id AND usuario_id = ?) AS le_has_dado_like,
-                (SELECT COUNT(*) FROM comentarios WHERE publicacion_id = p.id) AS total_comentarios
-            FROM publicaciones p JOIN usuarios u ON p.usuario_id = u.id JOIN seguidores s ON p.usuario_id = s.seguido_id
-            WHERE s.seguidor_id = ? ORDER BY p.fecha_creacion DESC
-            LIMIT ? OFFSET ?
-        `;
+        SELECT p.*, u.username, u.avatar_url,
+               (SELECT COUNT(*) FROM likes WHERE publicacion_id = p.id) AS total_likes,
+               (SELECT COUNT(*) FROM comentarios WHERE publicacion_id = p.id) AS total_comentarios,
+               (SELECT COUNT(*) FROM likes WHERE publicacion_id = p.id AND usuario_id = ?) AS le_has_dado_like,
+               -- 👇 ESTA ES LA LÍNEA QUE FALTABA O ESTABA MAL 👇
+               (SELECT GROUP_CONCAT(imagen_url) FROM publicaciones_imagenes WHERE publicacion_id = p.id) AS imagenes
+        FROM publicaciones p
+        JOIN usuarios u ON p.usuario_id = u.id
+        JOIN seguidores s ON p.usuario_id = s.seguido_id
+        WHERE s.seguidor_id = ?
+        ORDER BY p.fecha_creacion DESC
+        LIMIT ? OFFSET ?
+    `;
         const [publicaciones] = await db.query(query, [miUsuarioId, miUsuarioId, limit, offset]);
 
         const formateadas = publicaciones.map(post => ({
