@@ -467,3 +467,37 @@ app.put('/api/usuarios/fcm-token', verificarToken, async (req, res) => {
         res.status(500).json({ error: 'Error al guardar token FCM' });
     }
 });
+
+// 👇 Fíjate que ahora dice upload.array('imagenes', 4) en lugar de single 👇
+app.post('/api/publicaciones', verificarToken, upload.array('imagenes', 4), async (req, res) => {
+    const { contenido } = req.body;
+    const usuarioId = req.usuario.id;
+
+    try {
+        // 1. Insertamos el texto de la publicación
+        const [resultado] = await db.query(
+            'INSERT INTO publicaciones (usuario_id, contenido) VALUES (?, ?)', 
+            [usuarioId, contenido]
+        );
+        
+        const publicacionId = resultado.insertId;
+
+        // 2. Si vienen imágenes, las guardamos en la nueva tabla
+        if (req.files && req.files.length > 0) {
+            const queries = req.files.map(file => {
+                const url = `http://209.38.196.225:3000/uploads/${file.filename}`;
+                return db.query(
+                    'INSERT INTO publicaciones_imagenes (publicacion_id, imagen_url) VALUES (?, ?)', 
+                    [publicacionId, url]
+                );
+            });
+            // Ejecutamos todas las inserciones a la vez
+            await Promise.all(queries);
+        }
+
+        res.status(201).json({ mensaje: 'Publicación creada' });
+    } catch (error) {
+        console.error(error);
+        res.status(500).json({ error: 'Error al crear publicación' });
+    }
+});
