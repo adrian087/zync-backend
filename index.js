@@ -37,25 +37,33 @@ app.listen(PORT, () => {
 });
 
 // ==========================================
-// RUTA: REGISTRO DE USUARIO
+// RUTA: REGISTRO DE USUARIO (Actualizada con 5 campos)
 // ==========================================
 app.post('/api/registro', async (req, res) => {
-    const { username, email, password } = req.body;
-    if (!username || !email || !password) return res.status(400).json({ error: 'Faltan datos' });
+    const { nombres, apellidos, username, email, password } = req.body;
+
+    if (!nombres || !apellidos || !username || !email || !password) {
+        return res.status(400).json({ error: 'Faltan datos obligatorios' });
+    }
 
     try {
         const salt = await bcrypt.genSalt(10);
         const hashedPassword = await bcrypt.hash(password, salt);
-        const query = 'INSERT INTO usuarios (username, email, password) VALUES (?, ?, ?)';
-        const [resultado] = await db.query(query, [username, email, hashedPassword]);
+
+        const query = 'INSERT INTO usuarios (nombres, apellidos, username, email, password) VALUES (?, ?, ?, ?, ?)';
+        const [resultado] = await db.query(query, [nombres, apellidos, username, email, hashedPassword]);
+
         res.status(201).json({ mensaje: 'Usuario registrado con éxito', usuarioId: resultado.insertId });
     } catch (error) {
-        if (error.code === 'ER_DUP_ENTRY') return res.status(409).json({ error: 'Usuario/email en uso' });
-        res.status(500).json({ error: 'Error interno' });
+        if (error.code === 'ER_DUP_ENTRY') return res.status(409).json({ error: 'El usuario o email ya está en uso' });
+        console.error(error);
+        res.status(500).json({ error: 'Error interno del servidor' });
     }
 });
 
+// ==========================================
 // RUTA: LOGIN
+// ==========================================
 app.post('/api/login', async (req, res) => {
     const { email, password } = req.body;
     if (!email || !password) return res.status(400).json({ error: 'Faltan datos' });
@@ -75,7 +83,9 @@ app.post('/api/login', async (req, res) => {
     }
 });
 
+// ==========================================
 // RUTA: CREAR PUBLICACIÓN
+// ==========================================
 app.post('/api/publicaciones', verificarToken, upload.single('imagen'), async (req, res) => {
     const { contenido } = req.body;
     const imagenUrl = req.file ? `/uploads/${req.file.filename}` : null;
@@ -91,23 +101,25 @@ app.post('/api/publicaciones', verificarToken, upload.single('imagen'), async (r
     }
 });
 
-// RUTA: VER EL FEED (Todas las publicaciones)
+// ==========================================
+// RUTA: VER EL FEED (Todas las publicaciones - PAGINADO)
+// ==========================================
 app.get('/api/publicaciones', verificarToken, async (req, res) => {
-
     const page = parseInt(req.query.page) || 1;
-    const limit = 10; // Cuántos Zyncs enviamos de golpe
-    const offset = (page - 1) * limit; // Cuántos Zyncs nos saltamos
+    const limit = 10; 
+    const offset = (page - 1) * limit; 
+    
     try {
         const query = `
-    SELECT p.*, u.username, u.avatar_url,
-    (SELECT COUNT(*) FROM likes WHERE publicacion_id = p.id) AS total_likes,
-    (SELECT COUNT(*) FROM comentarios WHERE publicacion_id = p.id) AS total_comentarios,
-    (SELECT COUNT(*) FROM likes WHERE publicacion_id = p.id AND usuario_id = ?) AS le_has_dado_like
-    FROM publicaciones p
-    JOIN usuarios u ON p.usuario_id = u.id
-    ORDER BY p.fecha_creacion DESC
-    LIMIT ? OFFSET ?
-`;
+            SELECT p.*, u.username, u.avatar_url,
+            (SELECT COUNT(*) FROM likes WHERE publicacion_id = p.id) AS total_likes,
+            (SELECT COUNT(*) FROM comentarios WHERE publicacion_id = p.id) AS total_comentarios,
+            (SELECT COUNT(*) FROM likes WHERE publicacion_id = p.id AND usuario_id = ?) AS le_has_dado_like
+            FROM publicaciones p
+            JOIN usuarios u ON p.usuario_id = u.id
+            ORDER BY p.fecha_creacion DESC
+            LIMIT ? OFFSET ?
+        `;
 
         const [publicaciones] = await db.query(query, [req.usuario.id, limit, offset]);
 
@@ -122,7 +134,9 @@ app.get('/api/publicaciones', verificarToken, async (req, res) => {
     }
 });
 
+// ==========================================
 // RUTA: DAR LIKE
+// ==========================================
 app.post('/api/publicaciones/:id/like', verificarToken, async (req, res) => {
     const publicacionId = req.params.id;
     const usuarioId = req.usuario.id;
@@ -140,7 +154,9 @@ app.post('/api/publicaciones/:id/like', verificarToken, async (req, res) => {
     }
 });
 
+// ==========================================
 // RUTA: MI PERFIL PRIVADO
+// ==========================================
 app.get('/api/perfil', verificarToken, async (req, res) => {
     try {
         const usuarioId = req.usuario.id;
@@ -177,23 +193,20 @@ app.get('/api/perfil', verificarToken, async (req, res) => {
 });
 
 // ==========================================
-// NUEVA RUTA: EDITAR MI PERFIL (Protegida + MULTER)
+// RUTA: EDITAR MI PERFIL (Protegida + MULTER)
 // ==========================================
 app.put('/api/perfil/editar', verificarToken, upload.single('avatar'), async (req, res) => {
     const { username, bio } = req.body;
     const usuarioId = req.usuario.id;
 
-    // Si sube imagen, pillamos la ruta, si no, undefined para no sobrescribir con null
     const avatarUrl = req.file ? `/uploads/${req.file.filename}` : undefined;
 
     try {
-        // Comprobar si el username ya lo tiene otro
         if (username) {
             const [existe] = await db.query('SELECT id FROM usuarios WHERE username = ? AND id != ?', [username, usuarioId]);
             if (existe.length > 0) return res.status(400).json({ error: 'El nombre de usuario ya está en uso' });
         }
 
-        // Construimos la query dinámicamente según lo que envíe
         let query = 'UPDATE usuarios SET ';
         let valores = [];
 
@@ -201,7 +214,6 @@ app.put('/api/perfil/editar', verificarToken, upload.single('avatar'), async (re
         if (bio !== undefined) { query += 'bio = ?, '; valores.push(bio); }
         if (avatarUrl) { query += 'avatar_url = ?, '; valores.push(avatarUrl); }
 
-        // Quitamos la última coma y espacio, y añadimos el WHERE
         query = query.slice(0, -2) + ' WHERE id = ?';
         valores.push(usuarioId);
 
@@ -218,7 +230,9 @@ app.put('/api/perfil/editar', verificarToken, upload.single('avatar'), async (re
     }
 });
 
+// ==========================================
 // RUTA: BORRAR PUBLICACIÓN
+// ==========================================
 app.delete('/api/publicaciones/:id', verificarToken, async (req, res) => {
     try {
         const [resultado] = await db.query('DELETE FROM publicaciones WHERE id = ? AND usuario_id = ?', [req.params.id, req.usuario.id]);
@@ -229,7 +243,9 @@ app.delete('/api/publicaciones/:id', verificarToken, async (req, res) => {
     }
 });
 
+// ==========================================
 // RUTA: CREAR COMENTARIO
+// ==========================================
 app.post('/api/publicaciones/:id/comentarios', verificarToken, async (req, res) => {
     const { contenido } = req.body;
     if (!contenido) return res.status(400).json({ error: 'Vacío' });
@@ -241,7 +257,9 @@ app.post('/api/publicaciones/:id/comentarios', verificarToken, async (req, res) 
     }
 });
 
+// ==========================================
 // RUTA: VER COMENTARIOS
+// ==========================================
 app.get('/api/publicaciones/:id/comentarios', verificarToken, async (req, res) => {
     try {
         const query = `
@@ -261,7 +279,9 @@ app.get('/api/publicaciones/:id/comentarios', verificarToken, async (req, res) =
     }
 });
 
+// ==========================================
 // RUTA: BUSCAR USUARIOS
+// ==========================================
 app.get('/api/usuarios/buscar', verificarToken, async (req, res) => {
     const termino = req.query.q;
     if (!termino || termino.trim() === '') return res.json([]);
@@ -276,7 +296,9 @@ app.get('/api/usuarios/buscar', verificarToken, async (req, res) => {
     }
 });
 
+// ==========================================
 // RUTA: BUSCAR PUBLICACIONES
+// ==========================================
 app.get('/api/publicaciones/buscar', verificarToken, async (req, res) => {
     const termino = req.query.q;
     if (!termino || termino.trim() === '') return res.json([]);
@@ -300,7 +322,9 @@ app.get('/api/publicaciones/buscar', verificarToken, async (req, res) => {
     }
 });
 
+// ==========================================
 // RUTA: SEGUIR / DEJAR DE SEGUIR
+// ==========================================
 app.post('/api/usuarios/:id/seguir', verificarToken, async (req, res) => {
     const usuarioAseguirId = req.params.id;
     const miUsuarioId = req.usuario.id;
@@ -319,8 +343,14 @@ app.post('/api/usuarios/:id/seguir', verificarToken, async (req, res) => {
     }
 });
 
-// RUTA: FEED "SIGUIENDO"
+// ==========================================
+// RUTA: FEED "SIGUIENDO" (PAGINADO)
+// ==========================================
 app.get('/api/publicaciones/siguiendo', verificarToken, async (req, res) => {
+    const page = parseInt(req.query.page) || 1;
+    const limit = 10;
+    const offset = (page - 1) * limit;
+
     try {
         const miUsuarioId = req.usuario.id;
         const query = `
@@ -331,8 +361,10 @@ app.get('/api/publicaciones/siguiendo', verificarToken, async (req, res) => {
                 (SELECT COUNT(*) FROM comentarios WHERE publicacion_id = p.id) AS total_comentarios
             FROM publicaciones p JOIN usuarios u ON p.usuario_id = u.id JOIN seguidores s ON p.usuario_id = s.seguido_id
             WHERE s.seguidor_id = ? ORDER BY p.fecha_creacion DESC
+            LIMIT ? OFFSET ?
         `;
-        const [publicaciones] = await db.query(query, [miUsuarioId, miUsuarioId]);
+        const [publicaciones] = await db.query(query, [miUsuarioId, miUsuarioId, limit, offset]);
+        
         const formateadas = publicaciones.map(post => ({
             ...post,
             imagen_url: post.imagen_url ? `http://209.38.196.225:3000${post.imagen_url}` : null,
@@ -344,7 +376,9 @@ app.get('/api/publicaciones/siguiendo', verificarToken, async (req, res) => {
     }
 });
 
+// ==========================================
 // RUTA: PERFIL PÚBLICO
+// ==========================================
 app.get('/api/usuarios/:id', verificarToken, async (req, res) => {
     const perfilId = req.params.id;
     const miUsuarioId = req.usuario.id;
@@ -387,33 +421,5 @@ app.get('/api/usuarios/:id', verificarToken, async (req, res) => {
         });
     } catch (error) {
         res.status(500).json({ error: 'Error al cargar perfil' });
-    }
-});
-
-// ==========================================
-// RUTA: REGISTRO DE USUARIO
-// ==========================================
-app.post('/api/registro', async (req, res) => {
-    // 👇 Añadimos nombres y apellidos a la recolección de datos 👇
-    const { nombres, apellidos, username, email, password } = req.body;
-
-    // Validamos que vengan todos los campos
-    if (!nombres || !apellidos || !username || !email || !password) {
-        return res.status(400).json({ error: 'Faltan datos obligatorios' });
-    }
-
-    try {
-        const salt = await bcrypt.genSalt(10);
-        const hashedPassword = await bcrypt.hash(password, salt);
-
-        // 👇 Actualizamos la consulta SQL para insertar los 5 campos 👇
-        const query = 'INSERT INTO usuarios (nombres, apellidos, username, email, password) VALUES (?, ?, ?, ?, ?)';
-        const [resultado] = await db.query(query, [nombres, apellidos, username, email, hashedPassword]);
-
-        res.status(201).json({ mensaje: 'Usuario registrado con éxito', usuarioId: resultado.insertId });
-    } catch (error) {
-        if (error.code === 'ER_DUP_ENTRY') return res.status(409).json({ error: 'El usuario o email ya está en uso' });
-        console.error(error);
-        res.status(500).json({ error: 'Error interno del servidor' });
     }
 });
