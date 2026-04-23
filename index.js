@@ -20,7 +20,7 @@ app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 // CONFIGURACIÓN DE MULTER
 const storage = multer.diskStorage({
     destination: function (req, file, cb) {
-        cb(null, 'uploads/'); 
+        cb(null, 'uploads/');
     },
     filename: function (req, file, cb) {
         cb(null, Date.now() + path.extname(file.originalname));
@@ -93,19 +93,24 @@ app.post('/api/publicaciones', verificarToken, upload.single('imagen'), async (r
 
 // RUTA: VER EL FEED (Todas las publicaciones)
 app.get('/api/publicaciones', verificarToken, async (req, res) => {
+
+    const page = parseInt(req.query.page) || 1;
+    const limit = 10; // Cuántos Zyncs enviamos de golpe
+    const offset = (page - 1) * limit; // Cuántos Zyncs nos saltamos
     try {
         const query = `
-            SELECT 
-                p.id, p.usuario_id, p.contenido, p.imagen_url, p.fecha_creacion, u.username, u.avatar_url,
-                (SELECT COUNT(*) FROM likes WHERE publicacion_id = p.id) AS total_likes,
-                (SELECT COUNT(*) FROM likes WHERE publicacion_id = p.id AND usuario_id = ?) AS le_has_dado_like,
-                (SELECT COUNT(*) FROM comentarios WHERE publicacion_id = p.id) AS total_comentarios
-            FROM publicaciones p
-            JOIN usuarios u ON p.usuario_id = u.id
-            ORDER BY p.fecha_creacion DESC
-        `;
-        const [publicaciones] = await db.query(query, [req.usuario.id]);
-        
+    SELECT p.*, u.username, u.avatar_url,
+    (SELECT COUNT(*) FROM likes WHERE publicacion_id = p.id) AS total_likes,
+    (SELECT COUNT(*) FROM comentarios WHERE publicacion_id = p.id) AS total_comentarios,
+    (SELECT COUNT(*) FROM likes WHERE publicacion_id = p.id AND usuario_id = ?) AS le_has_dado_like
+    FROM publicaciones p
+    JOIN usuarios u ON p.usuario_id = u.id
+    ORDER BY p.fecha_creacion DESC
+    LIMIT ? OFFSET ?
+`;
+
+        const [publicaciones] = await db.query(query, [req.usuario.id, limit, offset]);
+
         const formateadas = publicaciones.map(post => ({
             ...post,
             imagen_url: post.imagen_url ? `http://209.38.196.225:3000${post.imagen_url}` : null,
@@ -140,7 +145,7 @@ app.get('/api/perfil', verificarToken, async (req, res) => {
     try {
         const usuarioId = req.usuario.id;
         const [usuarioData] = await db.query('SELECT username, bio, avatar_url FROM usuarios WHERE id = ?', [usuarioId]);
-        
+
         const query = `
             SELECT 
                 p.id, p.usuario_id, p.contenido, p.imagen_url, p.fecha_creacion, u.username, u.avatar_url,
@@ -152,7 +157,7 @@ app.get('/api/perfil', verificarToken, async (req, res) => {
             ORDER BY p.fecha_creacion DESC
         `;
         const [publicaciones] = await db.query(query, [usuarioId, usuarioId]);
-        
+
         const formateadas = publicaciones.map(post => ({
             ...post,
             imagen_url: post.imagen_url ? `http://209.38.196.225:3000${post.imagen_url}` : null,
@@ -177,7 +182,7 @@ app.get('/api/perfil', verificarToken, async (req, res) => {
 app.put('/api/perfil/editar', verificarToken, upload.single('avatar'), async (req, res) => {
     const { username, bio } = req.body;
     const usuarioId = req.usuario.id;
-    
+
     // Si sube imagen, pillamos la ruta, si no, undefined para no sobrescribir con null
     const avatarUrl = req.file ? `/uploads/${req.file.filename}` : undefined;
 
@@ -201,8 +206,8 @@ app.put('/api/perfil/editar', verificarToken, upload.single('avatar'), async (re
         valores.push(usuarioId);
 
         await db.query(query, valores);
-        
-        res.json({ 
+
+        res.json({
             mensaje: 'Perfil actualizado correctamente',
             avatar_url: avatarUrl ? `http://209.38.196.225:3000${avatarUrl}` : null
         });
@@ -245,7 +250,7 @@ app.get('/api/publicaciones/:id/comentarios', verificarToken, async (req, res) =
             WHERE c.publicacion_id = ? ORDER BY c.fecha_creacion ASC
         `;
         const [comentarios] = await db.query(query, [req.params.id]);
-        
+
         const formateados = comentarios.map(com => ({
             ...com,
             avatar_url: com.avatar_url ? `http://209.38.196.225:3000${com.avatar_url}` : null
@@ -258,7 +263,7 @@ app.get('/api/publicaciones/:id/comentarios', verificarToken, async (req, res) =
 
 // RUTA: BUSCAR USUARIOS
 app.get('/api/usuarios/buscar', verificarToken, async (req, res) => {
-    const termino = req.query.q; 
+    const termino = req.query.q;
     if (!termino || termino.trim() === '') return res.json([]);
     try {
         const [usuarios] = await db.query('SELECT id, username, avatar_url FROM usuarios WHERE username LIKE ? LIMIT 15', [`%${termino}%`]);
@@ -273,7 +278,7 @@ app.get('/api/usuarios/buscar', verificarToken, async (req, res) => {
 
 // RUTA: BUSCAR PUBLICACIONES
 app.get('/api/publicaciones/buscar', verificarToken, async (req, res) => {
-    const termino = req.query.q; 
+    const termino = req.query.q;
     if (!termino || termino.trim() === '') return res.json([]);
     try {
         const query = `
@@ -297,8 +302,8 @@ app.get('/api/publicaciones/buscar', verificarToken, async (req, res) => {
 
 // RUTA: SEGUIR / DEJAR DE SEGUIR
 app.post('/api/usuarios/:id/seguir', verificarToken, async (req, res) => {
-    const usuarioAseguirId = req.params.id; 
-    const miUsuarioId = req.usuario.id;     
+    const usuarioAseguirId = req.params.id;
+    const miUsuarioId = req.usuario.id;
     if (miUsuarioId.toString() === usuarioAseguirId.toString()) return res.status(400).json({ error: 'No te puedes seguir a ti mismo' });
     try {
         const [seguimiento] = await db.query('SELECT * FROM seguidores WHERE seguidor_id = ? AND seguido_id = ?', [miUsuarioId, usuarioAseguirId]);
@@ -341,8 +346,8 @@ app.get('/api/publicaciones/siguiendo', verificarToken, async (req, res) => {
 
 // RUTA: PERFIL PÚBLICO
 app.get('/api/usuarios/:id', verificarToken, async (req, res) => {
-    const perfilId = req.params.id;         
-    const miUsuarioId = req.usuario.id;     
+    const perfilId = req.params.id;
+    const miUsuarioId = req.usuario.id;
     try {
         const [usuarioData] = await db.query(`
             SELECT id, username, bio, avatar_url,
@@ -391,7 +396,7 @@ app.get('/api/usuarios/:id', verificarToken, async (req, res) => {
 app.post('/api/registro', async (req, res) => {
     // 👇 Añadimos nombres y apellidos a la recolección de datos 👇
     const { nombres, apellidos, username, email, password } = req.body;
-    
+
     // Validamos que vengan todos los campos
     if (!nombres || !apellidos || !username || !email || !password) {
         return res.status(400).json({ error: 'Faltan datos obligatorios' });
@@ -400,11 +405,11 @@ app.post('/api/registro', async (req, res) => {
     try {
         const salt = await bcrypt.genSalt(10);
         const hashedPassword = await bcrypt.hash(password, salt);
-        
+
         // 👇 Actualizamos la consulta SQL para insertar los 5 campos 👇
         const query = 'INSERT INTO usuarios (nombres, apellidos, username, email, password) VALUES (?, ?, ?, ?, ?)';
         const [resultado] = await db.query(query, [nombres, apellidos, username, email, hashedPassword]);
-        
+
         res.status(201).json({ mensaje: 'Usuario registrado con éxito', usuarioId: resultado.insertId });
     } catch (error) {
         if (error.code === 'ER_DUP_ENTRY') return res.status(409).json({ error: 'El usuario o email ya está en uso' });
