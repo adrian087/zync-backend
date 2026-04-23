@@ -12,9 +12,9 @@ const path = require('path');
 
 const app = express();
 // 👈 NUEVO: Envolvemos Express en un servidor HTTP para que soporte WebSockets
-const server = http.createServer(app); 
+const server = http.createServer(app);
 // 👈 NUEVO: Creamos el túnel Socket.io abierto a todas las conexiones
-const io = new Server(server, {        
+const io = new Server(server, {
     cors: { origin: '*' }
 });
 
@@ -102,18 +102,37 @@ app.post('/api/login', async (req, res) => {
 // ==========================================
 // RUTA: CREAR PUBLICACIÓN
 // ==========================================
-app.post('/api/publicaciones', verificarToken, upload.single('imagen'), async (req, res) => {
+// 👇 Fíjate que ahora dice upload.array('imagenes', 4) en lugar de single 👇
+app.post('/api/publicaciones', verificarToken, upload.array('imagenes', 4), async (req, res) => {
     const { contenido } = req.body;
-    const imagenUrl = req.file ? `/uploads/${req.file.filename}` : null;
-
-    if (!contenido && !imagenUrl) return res.status(400).json({ error: 'Añade texto o imagen' });
+    const usuarioId = req.usuario.id;
 
     try {
-        const query = 'INSERT INTO publicaciones (usuario_id, contenido, imagen_url) VALUES (?, ?, ?)';
-        const [resultado] = await db.query(query, [req.usuario.id, contenido || '', imagenUrl]);
-        res.status(201).json({ mensaje: 'Publicación creada', publicacionId: resultado.insertId });
+        // 1. Insertamos el texto de la publicación
+        const [resultado] = await db.query(
+            'INSERT INTO publicaciones (usuario_id, contenido) VALUES (?, ?)',
+            [usuarioId, contenido]
+        );
+
+        const publicacionId = resultado.insertId;
+
+        // 2. Si vienen imágenes, las guardamos en la nueva tabla puente
+        if (req.files && req.files.length > 0) {
+            const queries = req.files.map(file => {
+                const url = `http://209.38.196.225:3000/uploads/${file.filename}`;
+                return db.query(
+                    'INSERT INTO publicaciones_imagenes (publicacion_id, imagen_url) VALUES (?, ?)',
+                    [publicacionId, url]
+                );
+            });
+            // Ejecutamos todas las inserciones en paralelo
+            await Promise.all(queries);
+        }
+
+        res.status(201).json({ mensaje: 'Publicación creada' });
     } catch (error) {
-        res.status(500).json({ error: 'Error al crear' });
+        console.error(error);
+        res.status(500).json({ error: 'Error al crear publicación' });
     }
 });
 
@@ -122,20 +141,22 @@ app.post('/api/publicaciones', verificarToken, upload.single('imagen'), async (r
 // ==========================================
 app.get('/api/publicaciones', verificarToken, async (req, res) => {
     const page = parseInt(req.query.page) || 1;
-    const limit = 10; 
-    const offset = (page - 1) * limit; 
-    
+    const limit = 10;
+    const offset = (page - 1) * limit;
+
     try {
         const query = `
-            SELECT p.*, u.username, u.avatar_url,
-            (SELECT COUNT(*) FROM likes WHERE publicacion_id = p.id) AS total_likes,
-            (SELECT COUNT(*) FROM comentarios WHERE publicacion_id = p.id) AS total_comentarios,
-            (SELECT COUNT(*) FROM likes WHERE publicacion_id = p.id AND usuario_id = ?) AS le_has_dado_like
-            FROM publicaciones p
-            JOIN usuarios u ON p.usuario_id = u.id
-            ORDER BY p.fecha_creacion DESC
-            LIMIT ? OFFSET ?
-        `;
+    SELECT p.*, u.username, u.avatar_url,
+           (SELECT COUNT(*) FROM likes WHERE publicacion_id = p.id) AS total_likes,
+           (SELECT COUNT(*) FROM comentarios WHERE publicacion_id = p.id) AS total_comentarios,
+           (SELECT COUNT(*) FROM likes WHERE publicacion_id = p.id AND usuario_id = ?) AS le_has_dado_like,
+           -- 👇 LA LÍNEA NUEVA: Junta todas las URLs separadas por comas 👇
+           (SELECT GROUP_CONCAT(imagen_url) FROM publicaciones_imagenes WHERE publicacion_id = p.id) AS imagenes
+    FROM publicaciones p
+    JOIN usuarios u ON p.usuario_id = u.id
+    ORDER BY p.fecha_creacion DESC
+    LIMIT ? OFFSET ?
+`;
 
         const [publicaciones] = await db.query(query, [req.usuario.id, limit, offset]);
 
@@ -159,7 +180,7 @@ app.post('/api/publicaciones/:id/like', verificarToken, async (req, res) => {
     try {
         let liked = false;
         const [likes] = await db.query('SELECT * FROM likes WHERE usuario_id = ? AND publicacion_id = ?', [usuarioId, publicacionId]);
-        
+
         if (likes.length > 0) {
             await db.query('DELETE FROM likes WHERE usuario_id = ? AND publicacion_id = ?', [usuarioId, publicacionId]);
         } else {
@@ -393,7 +414,7 @@ app.get('/api/publicaciones/siguiendo', verificarToken, async (req, res) => {
             LIMIT ? OFFSET ?
         `;
         const [publicaciones] = await db.query(query, [miUsuarioId, miUsuarioId, limit, offset]);
-        
+
         const formateadas = publicaciones.map(post => ({
             ...post,
             imagen_url: post.imagen_url ? `http://209.38.196.225:3000${post.imagen_url}` : null,
@@ -465,39 +486,5 @@ app.put('/api/usuarios/fcm-token', verificarToken, async (req, res) => {
         res.json({ mensaje: 'Token FCM actualizado correctamente' });
     } catch (error) {
         res.status(500).json({ error: 'Error al guardar token FCM' });
-    }
-});
-
-// 👇 Fíjate que ahora dice upload.array('imagenes', 4) en lugar de single 👇
-app.post('/api/publicaciones', verificarToken, upload.array('imagenes', 4), async (req, res) => {
-    const { contenido } = req.body;
-    const usuarioId = req.usuario.id;
-
-    try {
-        // 1. Insertamos el texto de la publicación
-        const [resultado] = await db.query(
-            'INSERT INTO publicaciones (usuario_id, contenido) VALUES (?, ?)', 
-            [usuarioId, contenido]
-        );
-        
-        const publicacionId = resultado.insertId;
-
-        // 2. Si vienen imágenes, las guardamos en la nueva tabla
-        if (req.files && req.files.length > 0) {
-            const queries = req.files.map(file => {
-                const url = `http://209.38.196.225:3000/uploads/${file.filename}`;
-                return db.query(
-                    'INSERT INTO publicaciones_imagenes (publicacion_id, imagen_url) VALUES (?, ?)', 
-                    [publicacionId, url]
-                );
-            });
-            // Ejecutamos todas las inserciones a la vez
-            await Promise.all(queries);
-        }
-
-        res.status(201).json({ mensaje: 'Publicación creada' });
-    } catch (error) {
-        console.error(error);
-        res.status(500).json({ error: 'Error al crear publicación' });
     }
 });
