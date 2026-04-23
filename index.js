@@ -452,3 +452,18 @@ app.get('/api/usuarios/:id', verificarToken, async (req, res) => {
         res.status(500).json({ error: 'Error al cargar perfil' });
     }
 });
+
+// ==========================================
+// RUTA: GUARDAR TOKEN FCM DEL MÓVIL
+// ==========================================
+app.put('/api/usuarios/fcm-token', verificarToken, async (req, res) => {
+    const { fcm_token } = req.body;
+    if (!fcm_token) return res.status(400).json({ error: 'Falta el token' });
+
+    try {
+        await db.query('UPDATE usuarios SET fcm_token = ? WHERE id = ?', [fcm_token, req.usuario.id]);
+        res.json({ mensaje: 'Token FCM actualizado correctamente' });
+    } catch (error) {
+        res.status(500).json({ error: 'Error al guardar token FCM' });
+    }
+});
