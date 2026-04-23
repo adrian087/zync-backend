@@ -1,6 +1,6 @@
 const express = require('express');
-const http = require('http'); // 👈 NUEVO: Necesario para sockets
-const { Server } = require('socket.io'); // 👈 NUEVO: El motor de tiempo real
+const http = require('http'); 
+const { Server } = require('socket.io'); 
 const cors = require('cors');
 const db = require('./db');
 const bcrypt = require('bcrypt');
@@ -11,9 +11,7 @@ const multer = require('multer');
 const path = require('path');
 
 const app = express();
-// 👈 NUEVO: Envolvemos Express en un servidor HTTP para que soporte WebSockets
 const server = http.createServer(app);
-// 👈 NUEVO: Creamos el túnel Socket.io abierto a todas las conexiones
 const io = new Server(server, {
     cors: { origin: '*' }
 });
@@ -22,11 +20,8 @@ const PORT = 3000;
 
 app.use(cors());
 app.use(express.json());
-
-// HACER PÚBLICA LA CARPETA DE IMÁGENES
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
-// CONFIGURACIÓN DE MULTER
 const storage = multer.diskStorage({
     destination: function (req, file, cb) {
         cb(null, 'uploads/');
@@ -37,7 +32,6 @@ const storage = multer.diskStorage({
 });
 const upload = multer({ storage: storage });
 
-// 👇 NUEVO: Detectar cuándo alguien entra o sale del túnel
 io.on('connection', (socket) => {
     console.log('🔌 Un usuario se ha conectado al túnel de Zync');
     socket.on('disconnect', () => console.log('🔌 Usuario desconectado del túnel'));
@@ -47,13 +41,12 @@ app.get('/', (req, res) => {
     res.json({ mensaje: 'Servidor funcionando y conectado 🚀' });
 });
 
-// 👇 OJO AQUÍ: Ahora usamos server.listen en lugar de app.listen 👇
 server.listen(PORT, () => {
     console.log(`✅ Servidor en http://209.38.196.225:${PORT}`);
 });
 
 // ==========================================
-// RUTA: REGISTRO DE USUARIO (Actualizada con 5 campos)
+// RUTA: REGISTRO DE USUARIO
 // ==========================================
 app.post('/api/registro', async (req, res) => {
     const { nombres, apellidos, username, email, password } = req.body;
@@ -100,35 +93,23 @@ app.post('/api/login', async (req, res) => {
 });
 
 // ==========================================
-// RUTA: CREAR PUBLICACIÓN
+// RUTA: CREAR PUBLICACIÓN (CARRUSEL)
 // ==========================================
-// 👇 Fíjate que ahora dice upload.array('imagenes', 4) en lugar de single 👇
 app.post('/api/publicaciones', verificarToken, upload.array('imagenes', 4), async (req, res) => {
     const { contenido } = req.body;
     const usuarioId = req.usuario.id;
 
     try {
-        // 1. Insertamos el texto de la publicación
-        const [resultado] = await db.query(
-            'INSERT INTO publicaciones (usuario_id, contenido) VALUES (?, ?)',
-            [usuarioId, contenido]
-        );
-
+        const [resultado] = await db.query('INSERT INTO publicaciones (usuario_id, contenido) VALUES (?, ?)', [usuarioId, contenido]);
         const publicacionId = resultado.insertId;
 
-        // 2. Si vienen imágenes, las guardamos en la nueva tabla puente
         if (req.files && req.files.length > 0) {
             const queries = req.files.map(file => {
                 const url = `http://209.38.196.225:3000/uploads/${file.filename}`;
-                return db.query(
-                    'INSERT INTO publicaciones_imagenes (publicacion_id, imagen_url) VALUES (?, ?)',
-                    [publicacionId, url]
-                );
+                return db.query('INSERT INTO publicaciones_imagenes (publicacion_id, imagen_url) VALUES (?, ?)', [publicacionId, url]);
             });
-            // Ejecutamos todas las inserciones en paralelo
             await Promise.all(queries);
         }
-
         res.status(201).json({ mensaje: 'Publicación creada' });
     } catch (error) {
         console.error(error);
@@ -137,7 +118,7 @@ app.post('/api/publicaciones', verificarToken, upload.array('imagenes', 4), asyn
 });
 
 // ==========================================
-// RUTA: VER EL FEED (Todas las publicaciones - PAGINADO)
+// RUTA: VER EL FEED (PAGINADO)
 // ==========================================
 app.get('/api/publicaciones', verificarToken, async (req, res) => {
     const page = parseInt(req.query.page) || 1;
@@ -146,23 +127,19 @@ app.get('/api/publicaciones', verificarToken, async (req, res) => {
 
     try {
         const query = `
-    SELECT p.*, u.username, u.avatar_url,
-           (SELECT COUNT(*) FROM likes WHERE publicacion_id = p.id) AS total_likes,
-           (SELECT COUNT(*) FROM comentarios WHERE publicacion_id = p.id) AS total_comentarios,
-           (SELECT COUNT(*) FROM likes WHERE publicacion_id = p.id AND usuario_id = ?) AS le_has_dado_like,
-           -- 👇 LA LÍNEA NUEVA: Junta todas las URLs separadas por comas 👇
-           (SELECT GROUP_CONCAT(imagen_url) FROM publicaciones_imagenes WHERE publicacion_id = p.id) AS imagenes
-    FROM publicaciones p
-    JOIN usuarios u ON p.usuario_id = u.id
-    ORDER BY p.fecha_creacion DESC
-    LIMIT ? OFFSET ?
-`;
-
+            SELECT p.*, u.username, u.avatar_url,
+                   (SELECT COUNT(*) FROM likes WHERE publicacion_id = p.id) AS total_likes,
+                   (SELECT COUNT(*) FROM comentarios WHERE publicacion_id = p.id) AS total_comentarios,
+                   (SELECT COUNT(*) FROM likes WHERE publicacion_id = p.id AND usuario_id = ?) AS le_has_dado_like,
+                   (SELECT GROUP_CONCAT(imagen_url) FROM publicaciones_imagenes WHERE publicacion_id = p.id) AS imagenes
+            FROM publicaciones p
+            JOIN usuarios u ON p.usuario_id = u.id
+            ORDER BY p.fecha_creacion DESC
+            LIMIT ? OFFSET ?
+        `;
         const [publicaciones] = await db.query(query, [req.usuario.id, limit, offset]);
-
         const formateadas = publicaciones.map(post => ({
             ...post,
-            imagen_url: post.imagen_url ? `http://209.38.196.225:3000${post.imagen_url}` : null,
             avatar_url: post.avatar_url ? `http://209.38.196.225:3000${post.avatar_url}` : null
         }));
         res.json(formateadas);
@@ -172,7 +149,7 @@ app.get('/api/publicaciones', verificarToken, async (req, res) => {
 });
 
 // ==========================================
-// RUTA: DAR LIKE (👇 MAGIA DE SOCKET.IO AÑADIDA 👇)
+// RUTA: DAR LIKE (SOCKET.IO)
 // ==========================================
 app.post('/api/publicaciones/:id/like', verificarToken, async (req, res) => {
     const publicacionId = req.params.id;
@@ -188,14 +165,11 @@ app.post('/api/publicaciones/:id/like', verificarToken, async (req, res) => {
             liked = true;
         }
 
-        // Calculamos cuántos likes hay ahora en total en esa publicación
         const [likesCount] = await db.query('SELECT COUNT(*) as total FROM likes WHERE publicacion_id = ?', [publicacionId]);
-        const totalLikes = likesCount[0].total;
-
-        // 📢 ¡GRITAMOS POR EL TÚNEL! Avisamos a TODOS los móviles conectados que el contador ha cambiado
+        
         io.emit('actualizacion_like', {
             publicacionId: parseInt(publicacionId),
-            total_likes: totalLikes
+            total_likes: likesCount[0].total
         });
 
         return res.json({ mensaje: liked ? 'Like añadido ❤️' : 'Like quitado 💔', liked });
@@ -212,21 +186,22 @@ app.get('/api/perfil', verificarToken, async (req, res) => {
         const usuarioId = req.usuario.id;
         const [usuarioData] = await db.query('SELECT username, bio, avatar_url FROM usuarios WHERE id = ?', [usuarioId]);
 
-        const query = `
-            SELECT 
-                p.id, p.usuario_id, p.contenido, p.imagen_url, p.fecha_creacion, u.username, u.avatar_url,
-                (SELECT COUNT(*) FROM likes WHERE publicacion_id = p.id) AS total_likes,
-                (SELECT COUNT(*) FROM likes WHERE publicacion_id = p.id AND usuario_id = ?) AS le_has_dado_like
+        const queryPublicaciones = `
+            SELECT p.*, u.username, u.avatar_url,
+                   (SELECT COUNT(*) FROM likes WHERE publicacion_id = p.id) AS total_likes,
+                   (SELECT COUNT(*) FROM comentarios WHERE publicacion_id = p.id) AS total_comentarios,
+                   (SELECT COUNT(*) FROM likes WHERE publicacion_id = p.id AND usuario_id = ?) AS le_has_dado_like,
+                   (SELECT GROUP_CONCAT(imagen_url) FROM publicaciones_imagenes WHERE publicacion_id = p.id) AS imagenes
             FROM publicaciones p
             JOIN usuarios u ON p.usuario_id = u.id
             WHERE p.usuario_id = ?
             ORDER BY p.fecha_creacion DESC
         `;
-        const [publicaciones] = await db.query(query, [usuarioId, usuarioId]);
+
+        const [publicaciones] = await db.query(queryPublicaciones, [usuarioId, usuarioId]); // Corregido el nombre de la variable
 
         const formateadas = publicaciones.map(post => ({
             ...post,
-            imagen_url: post.imagen_url ? `http://209.38.196.225:3000${post.imagen_url}` : null,
             avatar_url: post.avatar_url ? `http://209.38.196.225:3000${post.avatar_url}` : null
         }));
 
@@ -243,12 +218,11 @@ app.get('/api/perfil', verificarToken, async (req, res) => {
 });
 
 // ==========================================
-// RUTA: EDITAR MI PERFIL (Protegida + MULTER)
+// RUTA: EDITAR MI PERFIL 
 // ==========================================
 app.put('/api/perfil/editar', verificarToken, upload.single('avatar'), async (req, res) => {
     const { username, bio } = req.body;
     const usuarioId = req.usuario.id;
-
     const avatarUrl = req.file ? `/uploads/${req.file.filename}` : undefined;
 
     try {
@@ -354,16 +328,16 @@ app.get('/api/publicaciones/buscar', verificarToken, async (req, res) => {
     if (!termino || termino.trim() === '') return res.json([]);
     try {
         const query = `
-            SELECT p.id, p.usuario_id, p.contenido, p.imagen_url, p.fecha_creacion, u.username, u.avatar_url,
+            SELECT p.id, p.usuario_id, p.contenido, p.fecha_creacion, u.username, u.avatar_url,
             (SELECT COUNT(*) FROM likes WHERE publicacion_id = p.id) AS total_likes,
-            (SELECT COUNT(*) FROM comentarios WHERE publicacion_id = p.id) AS total_comentarios
+            (SELECT COUNT(*) FROM comentarios WHERE publicacion_id = p.id) AS total_comentarios,
+            (SELECT GROUP_CONCAT(imagen_url) FROM publicaciones_imagenes WHERE publicacion_id = p.id) AS imagenes
             FROM publicaciones p JOIN usuarios u ON p.usuario_id = u.id 
             WHERE p.contenido LIKE ? ORDER BY p.fecha_creacion DESC LIMIT 20
         `;
         const [publicaciones] = await db.query(query, [`%${termino}%`]);
         const formateadas = publicaciones.map(post => ({
             ...post,
-            imagen_url: post.imagen_url ? `http://209.38.196.225:3000${post.imagen_url}` : null,
             avatar_url: post.avatar_url ? `http://209.38.196.225:3000${post.avatar_url}` : null
         }));
         res.json(formateadas);
@@ -408,7 +382,6 @@ app.get('/api/publicaciones/siguiendo', verificarToken, async (req, res) => {
                (SELECT COUNT(*) FROM likes WHERE publicacion_id = p.id) AS total_likes,
                (SELECT COUNT(*) FROM comentarios WHERE publicacion_id = p.id) AS total_comentarios,
                (SELECT COUNT(*) FROM likes WHERE publicacion_id = p.id AND usuario_id = ?) AS le_has_dado_like,
-               -- 👇 ESTA ES LA LÍNEA CLAVE QUE FALTABA 👇
                (SELECT GROUP_CONCAT(imagen_url) FROM publicaciones_imagenes WHERE publicacion_id = p.id) AS imagenes
         FROM publicaciones p
         JOIN usuarios u ON p.usuario_id = u.id
@@ -421,7 +394,6 @@ app.get('/api/publicaciones/siguiendo', verificarToken, async (req, res) => {
 
         const formateadas = publicaciones.map(post => ({
             ...post,
-            imagen_url: post.imagen_url ? `http://209.38.196.225:3000${post.imagen_url}` : null,
             avatar_url: post.avatar_url ? `http://209.38.196.225:3000${post.avatar_url}` : null
         }));
         res.json(formateadas);
@@ -437,31 +409,29 @@ app.get('/api/usuarios/:id', verificarToken, async (req, res) => {
     const perfilId = req.params.id;
     const miUsuarioId = req.usuario.id;
     try {
-        const [usuarioData] = await db.query(`
-            SELECT id, username, bio, avatar_url,
-            (SELECT COUNT(*) FROM publicaciones WHERE usuario_id = ?) AS total_posts,
-            (SELECT COUNT(*) FROM seguidores WHERE seguido_id = ?) AS total_seguidores,
-            (SELECT COUNT(*) FROM seguidores WHERE seguidor_id = ?) AS total_siguiendo
-            FROM usuarios WHERE id = ?
-        `, [perfilId, perfilId, perfilId, perfilId]);
-
+        // 👇 Faltaba buscar los datos del usuario antes de las publicaciones
+        const [usuarioData] = await db.query('SELECT id, username, bio, avatar_url FROM usuarios WHERE id = ?', [perfilId]);
         if (usuarioData.length === 0) return res.status(404).json({ error: 'Usuario no encontrado' });
 
         const [siguiendoData] = await db.query('SELECT * FROM seguidores WHERE seguidor_id = ? AND seguido_id = ?', [miUsuarioId, perfilId]);
         const leSigo = siguiendoData.length > 0;
 
-        const [publicaciones] = await db.query(`
-            SELECT p.id, p.usuario_id, p.contenido, p.imagen_url, p.fecha_creacion, u.username, u.avatar_url,
-            (SELECT COUNT(*) FROM likes WHERE publicacion_id = p.id) AS total_likes,
-            (SELECT COUNT(*) FROM likes WHERE publicacion_id = p.id AND usuario_id = ?) AS le_has_dado_like,
-            (SELECT COUNT(*) FROM comentarios WHERE publicacion_id = p.id) AS total_comentarios
-            FROM publicaciones p JOIN usuarios u ON p.usuario_id = u.id 
-            WHERE p.usuario_id = ? ORDER BY p.fecha_creacion DESC
-        `, [miUsuarioId, perfilId]);
+        const queryPublicaciones = `
+            SELECT p.*, u.username, u.avatar_url,
+                   (SELECT COUNT(*) FROM likes WHERE publicacion_id = p.id) AS total_likes,
+                   (SELECT COUNT(*) FROM comentarios WHERE publicacion_id = p.id) AS total_comentarios,
+                   (SELECT COUNT(*) FROM likes WHERE publicacion_id = p.id AND usuario_id = ?) AS le_has_dado_like,
+                   (SELECT GROUP_CONCAT(imagen_url) FROM publicaciones_imagenes WHERE publicacion_id = p.id) AS imagenes
+            FROM publicaciones p
+            JOIN usuarios u ON p.usuario_id = u.id
+            WHERE p.usuario_id = ?
+            ORDER BY p.fecha_creacion DESC
+        `;
+
+        const [publicaciones] = await db.query(queryPublicaciones, [miUsuarioId, perfilId]);
 
         const formateadas = publicaciones.map(post => ({
             ...post,
-            imagen_url: post.imagen_url ? `http://209.38.196.225:3000${post.imagen_url}` : null,
             avatar_url: post.avatar_url ? `http://209.38.196.225:3000${post.avatar_url}` : null
         }));
 
