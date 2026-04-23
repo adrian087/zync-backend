@@ -408,7 +408,7 @@ app.get('/api/publicaciones/siguiendo', verificarToken, async (req, res) => {
                (SELECT COUNT(*) FROM likes WHERE publicacion_id = p.id) AS total_likes,
                (SELECT COUNT(*) FROM comentarios WHERE publicacion_id = p.id) AS total_comentarios,
                (SELECT COUNT(*) FROM likes WHERE publicacion_id = p.id AND usuario_id = ?) AS le_has_dado_like,
-               -- 👇 ESTA ES LA LÍNEA QUE FALTABA O ESTABA MAL 👇
+               -- 👇 ESTA ES LA LÍNEA CLAVE QUE FALTABA 👇
                (SELECT GROUP_CONCAT(imagen_url) FROM publicaciones_imagenes WHERE publicacion_id = p.id) AS imagenes
         FROM publicaciones p
         JOIN usuarios u ON p.usuario_id = u.id
