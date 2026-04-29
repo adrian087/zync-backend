@@ -318,16 +318,23 @@ app.delete('/api/publicaciones/:id', verificarToken, async (req, res) => {
 });
 
 // ==========================================
-// RUTA: CREAR COMENTARIO
+// RUTA: CREAR COMENTARIO (Soporta respuestas anidadas)
 // ==========================================
 app.post('/api/publicaciones/:id/comentarios', verificarToken, async (req, res) => {
-    const { contenido } = req.body;
+    // 👇 Ahora recibimos también el ID del comentario al que respondemos (puede ser null)
+    const { contenido, comentario_padre_id } = req.body; 
+    
     if (!contenido) return res.status(400).json({ error: 'Vacío' });
+    
     try {
         const [pub] = await db.query('SELECT publicacion_original_id FROM publicaciones WHERE id = ?', [req.params.id]);
         const targetId = pub[0]?.publicacion_original_id || req.params.id;
 
-        await db.query('INSERT INTO comentarios (usuario_id, publicacion_id, contenido) VALUES (?, ?, ?)', [req.usuario.id, targetId, contenido]);
+        // Insertamos el comentario con su padre (si lo tiene)
+        await db.query(
+            'INSERT INTO comentarios (usuario_id, publicacion_id, contenido, comentario_padre_id) VALUES (?, ?, ?, ?)', 
+            [req.usuario.id, targetId, contenido, comentario_padre_id || null]
+        );
         res.status(201).json({ mensaje: 'Comentario publicado' });
     } catch (error) {
         res.status(500).json({ error: 'Error al comentar' });
@@ -335,17 +342,21 @@ app.post('/api/publicaciones/:id/comentarios', verificarToken, async (req, res) 
 });
 
 // ==========================================
-// RUTA: VER COMENTARIOS
+// RUTA: VER COMENTARIOS (Devuelve el padre)
 // ==========================================
 app.get('/api/publicaciones/:id/comentarios', verificarToken, async (req, res) => {
     try {
         const [pub] = await db.query('SELECT publicacion_original_id FROM publicaciones WHERE id = ?', [req.params.id]);
         const targetId = pub[0]?.publicacion_original_id || req.params.id;
 
+        // 👇 Ahora pedimos también c.comentario_padre_id en el SELECT
         const query = `
-            SELECT c.id, c.usuario_id, c.contenido, c.fecha_creacion, u.username, u.avatar_url 
-            FROM comentarios c JOIN usuarios u ON c.usuario_id = u.id 
-            WHERE c.publicacion_id = ? ORDER BY c.fecha_creacion ASC
+            SELECT c.id, c.usuario_id, c.contenido, c.fecha_creacion, c.comentario_padre_id, 
+                   u.username, u.avatar_url 
+            FROM comentarios c 
+            JOIN usuarios u ON c.usuario_id = u.id 
+            WHERE c.publicacion_id = ? 
+            ORDER BY c.fecha_creacion ASC
         `;
         const [comentarios] = await db.query(query, [targetId]);
         res.json(comentarios.map(formatearPost));
