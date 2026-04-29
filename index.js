@@ -46,7 +46,7 @@ server.listen(PORT, () => {
 });
 
 // ==========================================
-// 🧠 SUPER-CONSULTA BASE (Para soportar Re-Zyncs)
+// 🧠 SUPER-CONSULTA BASE (Re-Zyncs + Guardados)
 // ==========================================
 const baseQueryPublicaciones = `
     SELECT p.*, u.username, u.avatar_url,
@@ -59,6 +59,8 @@ const baseQueryPublicaciones = `
            (SELECT COUNT(*) FROM publicaciones WHERE publicacion_original_id = COALESCE(p.publicacion_original_id, p.id)) AS total_rezyncs,
            (SELECT COUNT(*) FROM likes WHERE publicacion_id = COALESCE(p.publicacion_original_id, p.id) AND usuario_id = ?) AS le_has_dado_like,
            (SELECT COUNT(*) FROM publicaciones WHERE publicacion_original_id = COALESCE(p.publicacion_original_id, p.id) AND usuario_id = ?) AS lo_has_rezynceado,
+           -- 👇 NUEVO: Saber si tú tienes este post guardado 👇
+           (SELECT COUNT(*) FROM guardados WHERE publicacion_id = COALESCE(p.publicacion_original_id, p.id) AND usuario_id = ?) AS lo_has_guardado,
            (SELECT GROUP_CONCAT(imagen_url) FROM publicaciones_imagenes WHERE publicacion_id = COALESCE(p.publicacion_original_id, p.id)) AS imagenes
     FROM publicaciones p
     JOIN usuarios u ON p.usuario_id = u.id
@@ -131,13 +133,12 @@ app.post('/api/publicaciones', verificarToken, upload.array('imagenes', 4), asyn
 });
 
 // ==========================================
-// RUTA: HACER RE-ZYNC (NUEVA 🔄)
+// RUTA: HACER RE-ZYNC (🔄)
 // ==========================================
 app.post('/api/publicaciones/:id/rezync', verificarToken, async (req, res) => {
     const publicacionIdParam = req.params.id;
     const miId = req.usuario.id;
     try {
-        // Asegurarnos de apuntar al original
         const [pub] = await db.query('SELECT publicacion_original_id FROM publicaciones WHERE id = ?', [publicacionIdParam]);
         if (pub.length === 0) return res.status(404).json({ error: 'Post no encontrado' });
         const originalId = pub[0].publicacion_original_id || publicacionIdParam;
@@ -162,6 +163,51 @@ app.post('/api/publicaciones/:id/rezync', verificarToken, async (req, res) => {
 });
 
 // ==========================================
+// RUTA: GUARDAR / QUITAR BOOKMARK (🔖)
+// ==========================================
+app.post('/api/publicaciones/:id/guardar', verificarToken, async (req, res) => {
+    const pId = req.params.id;
+    const uId = req.usuario.id;
+    try {
+        // Redirigir el guardado al post original si es un Re-Zync
+        const [pub] = await db.query('SELECT publicacion_original_id FROM publicaciones WHERE id = ?', [pId]);
+        if (pub.length === 0) return res.status(404).json({ error: 'No encontrado' });
+        const targetId = pub[0].publicacion_original_id || pId;
+
+        const [existe] = await db.query('SELECT id FROM guardados WHERE usuario_id = ? AND publicacion_id = ?', [uId, targetId]);
+        let guardado = false;
+
+        if (existe.length > 0) {
+            await db.query('DELETE FROM guardados WHERE id = ?', [existe[0].id]);
+        } else {
+            await db.query('INSERT INTO guardados (usuario_id, publicacion_id) VALUES (?, ?)', [uId, targetId]);
+            guardado = true;
+        }
+        res.json({ guardado, mensaje: guardado ? 'Zync guardado' : 'Zync eliminado de guardados' });
+    } catch (error) { 
+        res.status(500).json({ error: 'Error al guardar' }); 
+    }
+});
+
+// ==========================================
+// RUTA: VER MIS GUARDADOS (📂)
+// ==========================================
+app.get('/api/publicaciones/guardadas', verificarToken, async (req, res) => {
+    try {
+        const query = baseQueryPublicaciones + `
+            JOIN guardados g ON (p.id = g.publicacion_id OR p.publicacion_original_id = g.publicacion_id)
+            WHERE g.usuario_id = ?
+            ORDER BY g.fecha_guardado DESC
+        `;
+        // Pasamos 3 veces req.usuario.id para baseQuery, y 1 vez para la condición WHERE de guardados
+        const [publicaciones] = await db.query(query, [req.usuario.id, req.usuario.id, req.usuario.id, req.usuario.id]);
+        res.json(publicaciones.map(formatearPost));
+    } catch (error) { 
+        res.status(500).json({ error: 'Error al cargar guardados' }); 
+    }
+});
+
+// ==========================================
 // RUTA: VER EL FEED (PAGINADO)
 // ==========================================
 app.get('/api/publicaciones', verificarToken, async (req, res) => {
@@ -169,7 +215,8 @@ app.get('/api/publicaciones', verificarToken, async (req, res) => {
     const offset = ((parseInt(req.query.page) || 1) - 1) * limit;
     try {
         const query = baseQueryPublicaciones + ' ORDER BY p.fecha_creacion DESC LIMIT ? OFFSET ?';
-        const [publicaciones] = await db.query(query, [req.usuario.id, req.usuario.id, limit, offset]);
+        // Pasamos 3 veces el usuarioId para las 3 preguntas de la consulta base
+        const [publicaciones] = await db.query(query, [req.usuario.id, req.usuario.id, req.usuario.id, limit, offset]);
         res.json(publicaciones.map(formatearPost));
     } catch (error) {
         res.status(500).json({ error: 'Error al cargar el feed' });
@@ -183,7 +230,6 @@ app.post('/api/publicaciones/:id/like', verificarToken, async (req, res) => {
     const publicacionIdParam = req.params.id;
     const usuarioId = req.usuario.id;
     try {
-        // Redirigir el like al original si es un Re-Zync
         const [pub] = await db.query('SELECT publicacion_original_id FROM publicaciones WHERE id = ?', [publicacionIdParam]);
         if (pub.length === 0) return res.status(404).json({ error: 'No encontrado' });
         const targetId = pub[0].publicacion_original_id || publicacionIdParam;
@@ -215,7 +261,7 @@ app.get('/api/perfil', verificarToken, async (req, res) => {
         const usuarioId = req.usuario.id;
         const [usuarioData] = await db.query('SELECT username, bio, avatar_url FROM usuarios WHERE id = ?', [usuarioId]);
         const query = baseQueryPublicaciones + ' WHERE p.usuario_id = ? ORDER BY p.fecha_creacion DESC';
-        const [publicaciones] = await db.query(query, [usuarioId, usuarioId, usuarioId]);
+        const [publicaciones] = await db.query(query, [usuarioId, usuarioId, usuarioId, usuarioId]);
 
         res.json({
             username: usuarioData[0].username,
@@ -330,7 +376,7 @@ app.get('/api/publicaciones/buscar', verificarToken, async (req, res) => {
     if (!termino || termino.trim() === '') return res.json([]);
     try {
         const query = baseQueryPublicaciones + ' WHERE p.contenido LIKE ? OR po.contenido LIKE ? ORDER BY p.fecha_creacion DESC LIMIT 20';
-        const [publicaciones] = await db.query(query, [req.usuario.id, req.usuario.id, `%${termino}%`, `%${termino}%`]);
+        const [publicaciones] = await db.query(query, [req.usuario.id, req.usuario.id, req.usuario.id, `%${termino}%`, `%${termino}%`]);
         res.json(publicaciones.map(formatearPost));
     } catch (error) {
         res.status(500).json({ error: 'Error al buscar' });
@@ -370,7 +416,7 @@ app.get('/api/publicaciones/siguiendo', verificarToken, async (req, res) => {
             WHERE s.seguidor_id = ?
             ORDER BY p.fecha_creacion DESC LIMIT ? OFFSET ?
         `;
-        const [publicaciones] = await db.query(query, [req.usuario.id, req.usuario.id, req.usuario.id, limit, offset]);
+        const [publicaciones] = await db.query(query, [req.usuario.id, req.usuario.id, req.usuario.id, req.usuario.id, limit, offset]);
         res.json(publicaciones.map(formatearPost));
     } catch (error) {
         res.status(500).json({ error: 'Error al cargar feed' });
@@ -389,7 +435,7 @@ app.get('/api/usuarios/:id', verificarToken, async (req, res) => {
 
         const [siguiendoData] = await db.query('SELECT * FROM seguidores WHERE seguidor_id = ? AND seguido_id = ?', [miUsuarioId, perfilId]);
         const query = baseQueryPublicaciones + ' WHERE p.usuario_id = ? ORDER BY p.fecha_creacion DESC';
-        const [publicaciones] = await db.query(query, [miUsuarioId, miUsuarioId, perfilId]);
+        const [publicaciones] = await db.query(query, [miUsuarioId, miUsuarioId, miUsuarioId, perfilId]);
 
         res.json({
             usuario: {
