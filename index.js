@@ -435,7 +435,7 @@ app.get('/api/publicaciones/siguiendo', verificarToken, async (req, res) => {
 });
 
 // ==========================================
-// RUTA: PERFIL PÚBLICO
+// RUTA: PERFIL PÚBLICO (CORREGIDA)
 // ==========================================
 app.get('/api/usuarios/:id', verificarToken, async (req, res) => {
     const perfilId = req.params.id;
@@ -445,13 +445,22 @@ app.get('/api/usuarios/:id', verificarToken, async (req, res) => {
         if (usuarioData.length === 0) return res.status(404).json({ error: 'Usuario no encontrado' });
 
         const [siguiendoData] = await db.query('SELECT * FROM seguidores WHERE seguidor_id = ? AND seguido_id = ?', [miUsuarioId, perfilId]);
+        
+        // 👇 NUEVO: Contamos los seguidores y a los que sigue este usuario 👇
+        const [seguidoresCount] = await db.query('SELECT COUNT(*) as total FROM seguidores WHERE seguido_id = ?', [perfilId]);
+        const [siguiendoCount] = await db.query('SELECT COUNT(*) as total FROM seguidores WHERE seguidor_id = ?', [perfilId]);
+
         const query = baseQueryPublicaciones + ' WHERE p.usuario_id = ? ORDER BY p.fecha_creacion DESC';
+        // Pasamos 3 veces tu ID para la baseQuery y 1 vez el perfilId para el WHERE
         const [publicaciones] = await db.query(query, [miUsuarioId, miUsuarioId, miUsuarioId, perfilId]);
 
         res.json({
             usuario: {
                 ...usuarioData[0],
-                avatar_url: usuarioData[0].avatar_url ? `http://209.38.196.225:3000${usuarioData[0].avatar_url}` : null
+                avatar_url: usuarioData[0].avatar_url ? `http://209.38.196.225:3000${usuarioData[0].avatar_url}` : null,
+                total_seguidores: seguidoresCount[0].total,
+                total_siguiendo: siguiendoCount[0].total,
+                totalPosts: publicaciones.length // 👈 Añadimos el total de posts
             },
             le_sigo: siguiendoData.length > 0,
             publicaciones: publicaciones.map(formatearPost)
