@@ -474,3 +474,105 @@ app.put('/api/usuarios/fcm-token', verificarToken, async (req, res) => {
         res.status(500).json({ error: 'Error al guardar token FCM' });
     }
 });
+
+// ==========================================
+// RUTAS DE MENSAJES DIRECTOS
+// ==========================================
+
+// 1. Obtener lista de chats recientes (Bandeja de entrada)
+app.get('/api/mensajes/chats', verificarToken, async (req, res) => {
+    const miId = req.usuario.id;
+    try {
+        // Esta super-consulta agrupa los mensajes y saca el último de cada conversación
+        const query = `
+            SELECT 
+                u.id as otro_usuario_id, 
+                u.username, 
+                u.avatar_url, 
+                m.contenido as ultimo_mensaje, 
+                m.fecha_envio, 
+                m.leido,
+                m.remitente_id
+            FROM usuarios u
+            JOIN mensajes m ON (u.id = m.remitente_id OR u.id = m.destinatario_id)
+            WHERE (m.remitente_id = ? OR m.destinatario_id = ?)
+              AND u.id != ?
+              AND m.id = (
+                  SELECT MAX(id) 
+                  FROM mensajes m2 
+                  WHERE (m2.remitente_id = ? AND m2.destinatario_id = u.id) 
+                     OR (m2.remitente_id = u.id AND m2.destinatario_id = ?)
+              )
+            ORDER BY m.fecha_envio DESC
+        `;
+        // Le pasamos tu ID 5 veces para rellenar las interrogaciones de la consulta
+        const [chats] = await db.query(query, [miId, miId, miId, miId, miId]);
+
+        // Formateamos las fotos de perfil
+        const chatsFormateados = chats.map(chat => ({
+            ...chat,
+            avatar_url: chat.avatar_url ? `http://209.38.196.225:3000${chat.avatar_url}` : null
+        }));
+
+        res.json(chatsFormateados);
+    } catch (error) {
+        res.status(500).json({ error: 'Error al cargar la bandeja de entrada' });
+    }
+});
+
+// 2. Obtener historial de chat con un usuario específico
+app.get('/api/mensajes/:otroUsuarioId', verificarToken, async (req, res) => {
+    const miId = req.usuario.id;
+    const otroId = req.params.otroUsuarioId;
+    
+    try {
+        const query = `
+            SELECT m.*, u.username as remitente_username
+            FROM mensajes m
+            JOIN usuarios u ON m.remitente_id = u.id
+            WHERE (m.remitente_id = ? AND m.destinatario_id = ?)
+               OR (m.remitente_id = ? AND m.destinatario_id = ?)
+            ORDER BY m.fecha_envio ASC
+        `;
+        const [mensajes] = await db.query(query, [miId, otroId, otroId, miId]);
+
+        // Cuando entramos al chat, marcamos los mensajes que nos mandaron como leídos
+        await db.query('UPDATE mensajes SET leido = 1 WHERE remitente_id = ? AND destinatario_id = ?', [otroId, miId]);
+
+        res.json(mensajes);
+    } catch (error) {
+        res.status(500).json({ error: 'Error al cargar mensajes' });
+    }
+});
+
+// 3. Enviar un nuevo mensaje en tiempo real
+app.post('/api/mensajes/:otroUsuarioId', verificarToken, async (req, res) => {
+    const miId = req.usuario.id;
+    const otroId = req.params.otroUsuarioId;
+    const { contenido } = req.body;
+
+    if (!contenido || contenido.trim() === '') return res.status(400).json({ error: 'Mensaje vacío' });
+
+    try {
+        // Guardamos el mensaje en MySQL
+        const [resultado] = await db.query(
+            'INSERT INTO mensajes (remitente_id, destinatario_id, contenido) VALUES (?, ?, ?)',
+            [miId, otroId, contenido]
+        );
+
+        // Recuperamos el mensaje recién guardado con el nombre del remitente
+        const [nuevoMensaje] = await db.query(`
+            SELECT m.*, u.username as remitente_username
+            FROM mensajes m
+            JOIN usuarios u ON m.remitente_id = u.id
+            WHERE m.id = ?
+        `, [resultado.insertId]);
+
+        // 👇 MAGIA EN TIEMPO REAL: Emitimos el mensaje a todos los clientes 👇
+        io.emit('nuevo_mensaje', nuevoMensaje[0]);
+
+        res.status(201).json(nuevoMensaje[0]);
+    } catch (error) {
+        res.status(500).json({ error: 'Error al enviar mensaje' });
+    }
+});
