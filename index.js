@@ -677,3 +677,19 @@ app.put('/api/notificaciones/leidas', verificarToken, async (req, res) => {
         res.status(500).json({ error: 'Error al actualizar notificaciones' });
     }
 });
+
+// ==========================================
+// RUTA: ELIMINAR CUENTA (ZONA DE PELIGRO)
+// ==========================================
+app.delete('/api/usuarios/me', verificarToken, async (req, res) => {
+    const miId = req.usuario.id;
+    try {
+        // Al borrar el usuario, el ON DELETE CASCADE de MySQL limpiará automáticamente
+        // sus Zyncs, likes, comentarios, guardados, seguidores y notificaciones.
+        await db.query('DELETE FROM usuarios WHERE id = ?', [miId]);
+        res.json({ mensaje: 'Cuenta eliminada para siempre' });
+    } catch (error) {
+        console.error('Error al eliminar cuenta:', error);
+        res.status(500).json({ error: 'Error al eliminar la cuenta' });
+    }
+});
