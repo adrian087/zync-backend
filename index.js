@@ -151,6 +151,17 @@ app.post('/api/publicaciones/:id/rezync', verificarToken, async (req, res) => {
         } else {
             await db.query('INSERT INTO publicaciones (usuario_id, contenido, publicacion_original_id) VALUES (?, "", ?)', [miId, originalId]);
             rezynceado = true;
+
+            // 👇 NUEVO: GUARDAR NOTIFICACIÓN DE RE-ZYNC 👇
+            const [propietarioData] = await db.query('SELECT usuario_id FROM publicaciones WHERE id = ?', [originalId]);
+            const propietarioId = propietarioData[0].usuario_id;
+            
+            if (propietarioId !== miId) { // No me notifico a mí mismo
+                await db.query(
+                    "INSERT INTO notificaciones (usuario_destino_id, usuario_origen_id, tipo, publicacion_id) VALUES (?, ?, 'rezync', ?)", 
+                    [propietarioId, miId, originalId]
+                );
+            }
         }
 
         const [count] = await db.query('SELECT COUNT(*) as total FROM publicaciones WHERE publicacion_original_id = ?', [originalId]);
@@ -242,6 +253,17 @@ app.post('/api/publicaciones/:id/like', verificarToken, async (req, res) => {
         } else {
             await db.query('INSERT INTO likes (usuario_id, publicacion_id) VALUES (?, ?)', [usuarioId, targetId]);
             liked = true;
+
+            // 👇 NUEVO: GUARDAR NOTIFICACIÓN DE LIKE 👇
+            const [propietarioData] = await db.query('SELECT usuario_id FROM publicaciones WHERE id = ?', [targetId]);
+            const propietarioId = propietarioData[0].usuario_id;
+
+            if (propietarioId !== usuarioId) { // No me notifico a mí mismo
+                await db.query(
+                    "INSERT INTO notificaciones (usuario_destino_id, usuario_origen_id, tipo, publicacion_id) VALUES (?, ?, 'like', ?)", 
+                    [propietarioId, usuarioId, targetId]
+                );
+            }
         }
 
         const [likesCount] = await db.query('SELECT COUNT(*) as total FROM likes WHERE publicacion_id = ?', [targetId]);
@@ -318,11 +340,11 @@ app.delete('/api/publicaciones/:id', verificarToken, async (req, res) => {
 });
 
 // ==========================================
-// RUTA: CREAR COMENTARIO (Soporta respuestas anidadas)
+// RUTA: CREAR COMENTARIO
 // ==========================================
 app.post('/api/publicaciones/:id/comentarios', verificarToken, async (req, res) => {
-    // 👇 Ahora recibimos también el ID del comentario al que respondemos (puede ser null)
     const { contenido, comentario_padre_id } = req.body; 
+    const miId = req.usuario.id;
     
     if (!contenido) return res.status(400).json({ error: 'Vacío' });
     
@@ -330,11 +352,22 @@ app.post('/api/publicaciones/:id/comentarios', verificarToken, async (req, res) 
         const [pub] = await db.query('SELECT publicacion_original_id FROM publicaciones WHERE id = ?', [req.params.id]);
         const targetId = pub[0]?.publicacion_original_id || req.params.id;
 
-        // Insertamos el comentario con su padre (si lo tiene)
         await db.query(
             'INSERT INTO comentarios (usuario_id, publicacion_id, contenido, comentario_padre_id) VALUES (?, ?, ?, ?)', 
-            [req.usuario.id, targetId, contenido, comentario_padre_id || null]
+            [miId, targetId, contenido, comentario_padre_id || null]
         );
+
+        // 👇 NUEVO: GUARDAR NOTIFICACIÓN DE COMENTARIO 👇
+        const [propietarioData] = await db.query('SELECT usuario_id FROM publicaciones WHERE id = ?', [targetId]);
+        const propietarioId = propietarioData[0].usuario_id;
+
+        if (propietarioId !== miId) { // No me notifico a mí mismo
+            await db.query(
+                "INSERT INTO notificaciones (usuario_destino_id, usuario_origen_id, tipo, publicacion_id) VALUES (?, ?, 'comentario', ?)", 
+                [propietarioId, miId, targetId]
+            );
+        }
+
         res.status(201).json({ mensaje: 'Comentario publicado' });
     } catch (error) {
         res.status(500).json({ error: 'Error al comentar' });
@@ -400,14 +433,24 @@ app.get('/api/publicaciones/buscar', verificarToken, async (req, res) => {
 app.post('/api/usuarios/:id/seguir', verificarToken, async (req, res) => {
     const usuarioAseguirId = req.params.id;
     const miUsuarioId = req.usuario.id;
+    
     if (miUsuarioId.toString() === usuarioAseguirId.toString()) return res.status(400).json({ error: 'No te puedes seguir a ti mismo' });
+    
     try {
         const [seguimiento] = await db.query('SELECT * FROM seguidores WHERE seguidor_id = ? AND seguido_id = ?', [miUsuarioId, usuarioAseguirId]);
+        
         if (seguimiento.length > 0) {
             await db.query('DELETE FROM seguidores WHERE seguidor_id = ? AND seguido_id = ?', [miUsuarioId, usuarioAseguirId]);
             return res.json({ mensaje: 'Unfollow', siguiendo: false });
         } else {
             await db.query('INSERT INTO seguidores (seguidor_id, seguido_id) VALUES (?, ?)', [miUsuarioId, usuarioAseguirId]);
+            
+            // 👇 NUEVO: GUARDAR NOTIFICACIÓN DE SEGUIMIENTO 👇
+            await db.query(
+                "INSERT INTO notificaciones (usuario_destino_id, usuario_origen_id, tipo, publicacion_id) VALUES (?, ?, 'seguir', NULL)", 
+                [usuarioAseguirId, miUsuarioId]
+            );
+
             return res.json({ mensaje: 'Follow', siguiendo: true });
         }
     } catch (error) {
