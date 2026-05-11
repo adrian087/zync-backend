@@ -693,3 +693,59 @@ app.delete('/api/usuarios/me', verificarToken, async (req, res) => {
         res.status(500).json({ error: 'Error al eliminar la cuenta' });
     }
 });
+
+// ==========================================
+// RUTAS: CAMBIAR DATOS DE LA CUENTA
+// ==========================================
+
+// 1. Cambiar Nombre de Usuario
+app.put('/api/usuarios/me/username', verificarToken, async (req, res) => {
+    const { username } = req.body;
+    if (!username || username.trim() === '') return res.status(400).json({ error: 'El usuario no puede estar vacío' });
+    try {
+        const [existe] = await db.query('SELECT id FROM usuarios WHERE username = ? AND id != ?', [username, req.usuario.id]);
+        if (existe.length > 0) return res.status(400).json({ error: 'Este nombre de usuario ya está en uso' });
+        
+        await db.query('UPDATE usuarios SET username = ? WHERE id = ?', [username, req.usuario.id]);
+        res.json({ mensaje: 'Nombre de usuario actualizado' });
+    } catch (error) {
+        res.status(500).json({ error: 'Error al actualizar el usuario' });
+    }
+});
+
+// 2. Cambiar Correo Electrónico
+app.put('/api/usuarios/me/email', verificarToken, async (req, res) => {
+    const { email } = req.body;
+    if (!email || email.trim() === '') return res.status(400).json({ error: 'El correo no puede estar vacío' });
+    try {
+        const [existe] = await db.query('SELECT id FROM usuarios WHERE email = ? AND id != ?', [email, req.usuario.id]);
+        if (existe.length > 0) return res.status(400).json({ error: 'Este correo ya está registrado por otra cuenta' });
+        
+        await db.query('UPDATE usuarios SET email = ? WHERE id = ?', [email, req.usuario.id]);
+        res.json({ mensaje: 'Correo actualizado correctamente' });
+    } catch (error) {
+        res.status(500).json({ error: 'Error al actualizar el correo' });
+    }
+});
+
+// 3. Cambiar Contraseña
+app.put('/api/usuarios/me/password', verificarToken, async (req, res) => {
+    const { password_actual, password_nueva } = req.body;
+    if (!password_actual || !password_nueva) return res.status(400).json({ error: 'Faltan datos' });
+    try {
+        // Comprobar que la contraseña actual es correcta
+        const [usuarios] = await db.query('SELECT password FROM usuarios WHERE id = ?', [req.usuario.id]);
+        const passwordCorrecta = await bcrypt.compare(password_actual, usuarios[0].password);
+        
+        if (!passwordCorrecta) return res.status(401).json({ error: 'La contraseña actual es incorrecta' });
+        
+        // Cifrar la nueva contraseña
+        const salt = await bcrypt.genSalt(10);
+        const hashedNueva = await bcrypt.hash(password_nueva, salt);
+        
+        await db.query('UPDATE usuarios SET password = ? WHERE id = ?', [hashedNueva, req.usuario.id]);
+        res.json({ mensaje: 'Contraseña actualizada de forma segura' });
+    } catch (error) {
+        res.status(500).json({ error: 'Error al actualizar la contraseña' });
+    }
+});
