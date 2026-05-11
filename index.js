@@ -628,3 +628,52 @@ app.post('/api/mensajes/:otroUsuarioId', verificarToken, async (req, res) => {
         res.status(500).json({ error: 'Error al enviar mensaje' });
     }
 });
+
+// ==========================================
+// RUTAS DE NOTIFICACIONES 🔔
+// ==========================================
+
+// 1. Obtener el historial de notificaciones
+app.get('/api/notificaciones', verificarToken, async (req, res) => {
+    const miId = req.usuario.id;
+    const page = parseInt(req.query.page) || 1;
+    const limit = 20;
+    const offset = (page - 1) * limit;
+
+    try {
+        const query = `
+            SELECT 
+                n.id, n.tipo, n.leida, n.fecha_creacion, n.publicacion_id,
+                u.username as origen_username, u.avatar_url as origen_avatar,
+                p.contenido as publicacion_contenido
+            FROM notificaciones n
+            JOIN usuarios u ON n.usuario_origen_id = u.id
+            LEFT JOIN publicaciones p ON n.publicacion_id = p.id
+            WHERE n.usuario_destino_id = ?
+            ORDER BY n.fecha_creacion DESC
+            LIMIT ? OFFSET ?
+        `;
+        const [notificaciones] = await db.query(query, [miId, limit, offset]);
+
+        const notificacionesFormateadas = notificaciones.map(noti => ({
+            ...noti,
+            origen_avatar: noti.origen_avatar ? `http://209.38.196.225:3000${noti.origen_avatar}` : null
+        }));
+
+        res.json(notificacionesFormateadas);
+    } catch (error) {
+        console.error('Error al cargar notificaciones:', error);
+        res.status(500).json({ error: 'Error al cargar notificaciones' });
+    }
+});
+
+// 2. Marcar todas como leídas (Para apagar la campanita)
+app.put('/api/notificaciones/leidas', verificarToken, async (req, res) => {
+    const miId = req.usuario.id;
+    try {
+        await db.query('UPDATE notificaciones SET leida = 1 WHERE usuario_destino_id = ? AND leida = 0', [miId]);
+        res.json({ success: true });
+    } catch (error) {
+        res.status(500).json({ error: 'Error al actualizar notificaciones' });
+    }
+});
