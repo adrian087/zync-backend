@@ -1,6 +1,6 @@
 const express = require('express');
-const http = require('http'); 
-const { Server } = require('socket.io'); 
+const http = require('http');
+const { Server } = require('socket.io');
 const cors = require('cors');
 const db = require('./db');
 const bcrypt = require('bcrypt');
@@ -111,6 +111,56 @@ app.post('/api/login', async (req, res) => {
 });
 
 // ==========================================
+// RUTA: LOGIN / REGISTRO CON GOOGLE
+// ==========================================
+app.post('/api/auth/google', async (req, res) => {
+    const { email, displayName, photoUrl, googleId } = req.body;
+
+    if (!email) return res.status(400).json({ error: 'Falta el correo electrónico de Google' });
+
+    try {
+        // 1. Comprobamos si el usuario ya existe en nuestra base de datos
+        const [users] = await db.query('SELECT * FROM usuarios WHERE email = ?', [email]);
+        let usuario = users[0];
+
+        if (!usuario) {
+            // 2. Si es la primera vez que entra, lo REGISTRAMOS automáticamente.
+            // Le generamos un 'username' base usando su correo (ej: "adrian_dev" de adrian_dev@gmail.com)
+            const baseUsername = email.split('@')[0].toLowerCase().replace(/[^a-z0-9_]/g, '');
+
+            // Le ponemos una contraseña aleatoria imposible porque nunca la va a usar (entrará con Google)
+            const randomPassword = await bcrypt.hash(Math.random().toString(36).slice(-10), 10);
+
+            const [result] = await db.query(
+                'INSERT INTO usuarios (username, email, password, avatar_url) VALUES (?, ?, ?, ?)',
+                [baseUsername, email, randomPassword, photoUrl]
+            );
+
+            // Rescatamos los datos del usuario recién creado
+            usuario = {
+                id: result.insertId,
+                username: baseUsername,
+                email: email,
+                avatar_url: photoUrl
+            };
+        }
+
+        // 3. Generamos NUESTRO token de Zync (igual que en el login normal)
+        // IMPORTANTE: Asegúrate de que process.env.JWT_SECRET sea el mismo que usas en tu ruta de login
+        const token = jwt.sign(
+            { id: usuario.id, username: usuario.username },
+            process.env.JWT_SECRET || 'tu_secreto_super_seguro',
+            { expiresIn: '7d' }
+        );
+
+        res.json({ token, usuario });
+    } catch (error) {
+        console.error('Error en Login con Google:', error);
+        res.status(500).json({ error: 'Error interno del servidor' });
+    }
+});
+
+// ==========================================
 // RUTA: CREAR PUBLICACIÓN NORMAL (CARRUSEL)
 // ==========================================
 app.post('/api/publicaciones', verificarToken, upload.array('imagenes', 4), async (req, res) => {
@@ -155,10 +205,10 @@ app.post('/api/publicaciones/:id/rezync', verificarToken, async (req, res) => {
             // 👇 NUEVO: GUARDAR NOTIFICACIÓN DE RE-ZYNC 👇
             const [propietarioData] = await db.query('SELECT usuario_id FROM publicaciones WHERE id = ?', [originalId]);
             const propietarioId = propietarioData[0].usuario_id;
-            
+
             if (propietarioId !== miId) { // No me notifico a mí mismo
                 await db.query(
-                    "INSERT INTO notificaciones (usuario_destino_id, usuario_origen_id, tipo, publicacion_id) VALUES (?, ?, 'rezync', ?)", 
+                    "INSERT INTO notificaciones (usuario_destino_id, usuario_origen_id, tipo, publicacion_id) VALUES (?, ?, 'rezync', ?)",
                     [propietarioId, miId, originalId]
                 );
             }
@@ -195,8 +245,8 @@ app.post('/api/publicaciones/:id/guardar', verificarToken, async (req, res) => {
             guardado = true;
         }
         res.json({ guardado, mensaje: guardado ? 'Zync guardado' : 'Zync eliminado de guardados' });
-    } catch (error) { 
-        res.status(500).json({ error: 'Error al guardar' }); 
+    } catch (error) {
+        res.status(500).json({ error: 'Error al guardar' });
     }
 });
 
@@ -213,8 +263,8 @@ app.get('/api/publicaciones/guardadas', verificarToken, async (req, res) => {
         // Pasamos 3 veces req.usuario.id para baseQuery, y 1 vez para la condición WHERE de guardados
         const [publicaciones] = await db.query(query, [req.usuario.id, req.usuario.id, req.usuario.id, req.usuario.id]);
         res.json(publicaciones.map(formatearPost));
-    } catch (error) { 
-        res.status(500).json({ error: 'Error al cargar guardados' }); 
+    } catch (error) {
+        res.status(500).json({ error: 'Error al cargar guardados' });
     }
 });
 
@@ -260,7 +310,7 @@ app.post('/api/publicaciones/:id/like', verificarToken, async (req, res) => {
 
             if (propietarioId !== usuarioId) { // No me notifico a mí mismo
                 await db.query(
-                    "INSERT INTO notificaciones (usuario_destino_id, usuario_origen_id, tipo, publicacion_id) VALUES (?, ?, 'like', ?)", 
+                    "INSERT INTO notificaciones (usuario_destino_id, usuario_origen_id, tipo, publicacion_id) VALUES (?, ?, 'like', ?)",
                     [propietarioId, usuarioId, targetId]
                 );
             }
@@ -343,17 +393,17 @@ app.delete('/api/publicaciones/:id', verificarToken, async (req, res) => {
 // RUTA: CREAR COMENTARIO
 // ==========================================
 app.post('/api/publicaciones/:id/comentarios', verificarToken, async (req, res) => {
-    const { contenido, comentario_padre_id } = req.body; 
+    const { contenido, comentario_padre_id } = req.body;
     const miId = req.usuario.id;
-    
+
     if (!contenido) return res.status(400).json({ error: 'Vacío' });
-    
+
     try {
         const [pub] = await db.query('SELECT publicacion_original_id FROM publicaciones WHERE id = ?', [req.params.id]);
         const targetId = pub[0]?.publicacion_original_id || req.params.id;
 
         await db.query(
-            'INSERT INTO comentarios (usuario_id, publicacion_id, contenido, comentario_padre_id) VALUES (?, ?, ?, ?)', 
+            'INSERT INTO comentarios (usuario_id, publicacion_id, contenido, comentario_padre_id) VALUES (?, ?, ?, ?)',
             [miId, targetId, contenido, comentario_padre_id || null]
         );
 
@@ -363,7 +413,7 @@ app.post('/api/publicaciones/:id/comentarios', verificarToken, async (req, res) 
 
         if (propietarioId !== miId) { // No me notifico a mí mismo
             await db.query(
-                "INSERT INTO notificaciones (usuario_destino_id, usuario_origen_id, tipo, publicacion_id) VALUES (?, ?, 'comentario', ?)", 
+                "INSERT INTO notificaciones (usuario_destino_id, usuario_origen_id, tipo, publicacion_id) VALUES (?, ?, 'comentario', ?)",
                 [propietarioId, miId, targetId]
             );
         }
@@ -433,21 +483,21 @@ app.get('/api/publicaciones/buscar', verificarToken, async (req, res) => {
 app.post('/api/usuarios/:id/seguir', verificarToken, async (req, res) => {
     const usuarioAseguirId = req.params.id;
     const miUsuarioId = req.usuario.id;
-    
+
     if (miUsuarioId.toString() === usuarioAseguirId.toString()) return res.status(400).json({ error: 'No te puedes seguir a ti mismo' });
-    
+
     try {
         const [seguimiento] = await db.query('SELECT * FROM seguidores WHERE seguidor_id = ? AND seguido_id = ?', [miUsuarioId, usuarioAseguirId]);
-        
+
         if (seguimiento.length > 0) {
             await db.query('DELETE FROM seguidores WHERE seguidor_id = ? AND seguido_id = ?', [miUsuarioId, usuarioAseguirId]);
             return res.json({ mensaje: 'Unfollow', siguiendo: false });
         } else {
             await db.query('INSERT INTO seguidores (seguidor_id, seguido_id) VALUES (?, ?)', [miUsuarioId, usuarioAseguirId]);
-            
+
             // 👇 NUEVO: GUARDAR NOTIFICACIÓN DE SEGUIMIENTO 👇
             await db.query(
-                "INSERT INTO notificaciones (usuario_destino_id, usuario_origen_id, tipo, publicacion_id) VALUES (?, ?, 'seguir', NULL)", 
+                "INSERT INTO notificaciones (usuario_destino_id, usuario_origen_id, tipo, publicacion_id) VALUES (?, ?, 'seguir', NULL)",
                 [usuarioAseguirId, miUsuarioId]
             );
 
@@ -488,7 +538,7 @@ app.get('/api/usuarios/:id', verificarToken, async (req, res) => {
         if (usuarioData.length === 0) return res.status(404).json({ error: 'Usuario no encontrado' });
 
         const [siguiendoData] = await db.query('SELECT * FROM seguidores WHERE seguidor_id = ? AND seguido_id = ?', [miUsuarioId, perfilId]);
-        
+
         // 👇 NUEVO: Contamos los seguidores y a los que sigue este usuario 👇
         const [seguidoresCount] = await db.query('SELECT COUNT(*) as total FROM seguidores WHERE seguido_id = ?', [perfilId]);
         const [siguiendoCount] = await db.query('SELECT COUNT(*) as total FROM seguidores WHERE seguidor_id = ?', [perfilId]);
@@ -576,7 +626,7 @@ app.get('/api/mensajes/chats', verificarToken, async (req, res) => {
 app.get('/api/mensajes/:otroUsuarioId', verificarToken, async (req, res) => {
     const miId = req.usuario.id;
     const otroId = req.params.otroUsuarioId;
-    
+
     try {
         const query = `
             SELECT m.*, u.username as remitente_username
@@ -705,7 +755,7 @@ app.put('/api/usuarios/me/username', verificarToken, async (req, res) => {
     try {
         const [existe] = await db.query('SELECT id FROM usuarios WHERE username = ? AND id != ?', [username, req.usuario.id]);
         if (existe.length > 0) return res.status(400).json({ error: 'Este nombre de usuario ya está en uso' });
-        
+
         await db.query('UPDATE usuarios SET username = ? WHERE id = ?', [username, req.usuario.id]);
         res.json({ mensaje: 'Nombre de usuario actualizado' });
     } catch (error) {
@@ -720,7 +770,7 @@ app.put('/api/usuarios/me/email', verificarToken, async (req, res) => {
     try {
         const [existe] = await db.query('SELECT id FROM usuarios WHERE email = ? AND id != ?', [email, req.usuario.id]);
         if (existe.length > 0) return res.status(400).json({ error: 'Este correo ya está registrado por otra cuenta' });
-        
+
         await db.query('UPDATE usuarios SET email = ? WHERE id = ?', [email, req.usuario.id]);
         res.json({ mensaje: 'Correo actualizado correctamente' });
     } catch (error) {
@@ -736,13 +786,13 @@ app.put('/api/usuarios/me/password', verificarToken, async (req, res) => {
         // Comprobar que la contraseña actual es correcta
         const [usuarios] = await db.query('SELECT password FROM usuarios WHERE id = ?', [req.usuario.id]);
         const passwordCorrecta = await bcrypt.compare(password_actual, usuarios[0].password);
-        
+
         if (!passwordCorrecta) return res.status(401).json({ error: 'La contraseña actual es incorrecta' });
-        
+
         // Cifrar la nueva contraseña
         const salt = await bcrypt.genSalt(10);
         const hashedNueva = await bcrypt.hash(password_nueva, salt);
-        
+
         await db.query('UPDATE usuarios SET password = ? WHERE id = ?', [hashedNueva, req.usuario.id]);
         res.json({ mensaje: 'Contraseña actualizada de forma segura' });
     } catch (error) {
