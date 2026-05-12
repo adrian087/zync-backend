@@ -274,12 +274,28 @@ app.get('/api/publicaciones/guardadas', verificarToken, async (req, res) => {
 app.get('/api/publicaciones', verificarToken, async (req, res) => {
     const limit = 10;
     const offset = ((parseInt(req.query.page) || 1) - 1) * limit;
+    const miId = req.usuario.id; // Guardamos tu ID en una variable para que quede más limpio
+    
     try {
-        const query = baseQueryPublicaciones + ' ORDER BY p.fecha_creacion DESC LIMIT ? OFFSET ?';
-        // Pasamos 3 veces el usuarioId para las 3 preguntas de la consulta base
-        const [publicaciones] = await db.query(query, [req.usuario.id, req.usuario.id, req.usuario.id, limit, offset]);
+        // Añadimos el WHERE mágico:
+        // 1. O es un post original (publicacion_original_id IS NULL)
+        // 2. O el Re-Zync lo he hecho yo mismo (p.usuario_id = ?)
+        // 3. O el Re-Zync lo ha hecho alguien a quien sigo (p.usuario_id IN ...)
+        const query = baseQueryPublicaciones + `
+            WHERE p.publicacion_original_id IS NULL 
+               OR p.usuario_id = ? 
+               OR p.usuario_id IN (SELECT seguido_id FROM seguidores WHERE seguidor_id = ?)
+            ORDER BY p.fecha_creacion DESC 
+            LIMIT ? OFFSET ?
+        `;
+        
+        // CUIDADO AQUÍ: Ahora pasamos tu ID 5 veces. 
+        // (3 para los contadores de la super-consulta base + 2 para nuestras nuevas reglas del WHERE)
+        const [publicaciones] = await db.query(query, [miId, miId, miId, miId, miId, limit, offset]);
+        
         res.json(publicaciones.map(formatearPost));
     } catch (error) {
+        console.error('Error al cargar el feed Para ti:', error);
         res.status(500).json({ error: 'Error al cargar el feed' });
     }
 });
