@@ -148,8 +148,8 @@ app.post('/api/auth/google', async (req, res) => {
         // 3. Generamos NUESTRO token de Zync (igual que en el login normal)
         // IMPORTANTE: Asegúrate de que process.env.JWT_SECRET sea el mismo que usas en tu ruta de login
         const token = jwt.sign(
-            { id: usuario.id, username: usuario.username },
-            process.env.JWT_SECRET || 'tu_secreto_super_seguro',
+            { id: usuario.id }, 
+            'MI_CLAVE_SECRETA_SUPER_SEGURA',
             { expiresIn: '7d' }
         );
 
