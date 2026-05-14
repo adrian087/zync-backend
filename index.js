@@ -845,3 +845,114 @@ app.put('/api/usuarios/me/password', verificarToken, async (req, res) => {
         res.status(500).json({ error: 'Error al actualizar la contraseña' });
     }
 });
+
+// ==========================================
+// RUTA: CREAR STORY O ZYNC DROP (🔥)
+// ==========================================
+app.post('/api/stories', verificarToken, upload.single('media'), async (req, res) => {
+    const { tipo, max_visualizaciones } = req.body; // 'normal' o 'drop'
+    const miId = req.usuario.id;
+    const mediaUrl = req.file ? `/uploads/${req.file.filename}` : null;
+
+    if (!mediaUrl) return res.status(400).json({ error: 'Falta la imagen o vídeo' });
+
+    try {
+        // Si es un drop, guardamos el límite (por defecto 10 si no envían nada)
+        const maxVis = tipo === 'drop' ? (max_visualizaciones || 10) : null;
+        
+        const [resultado] = await db.query(
+            'INSERT INTO stories (usuario_id, media_url, tipo, max_visualizaciones) VALUES (?, ?, ?, ?)',
+            [miId, mediaUrl, tipo || 'normal', maxVis]
+        );
+
+        res.status(201).json({ mensaje: 'Historia publicada con éxito', storyId: resultado.insertId });
+    } catch (error) {
+        console.error('Error al subir Story:', error);
+        res.status(500).json({ error: 'Error al publicar' });
+    }
+});
+
+// ==========================================
+// RUTA: OBTENER EL FEED DE STORIES (El Radar 📡)
+// ==========================================
+app.get('/api/stories', verificarToken, async (req, res) => {
+    const miId = req.usuario.id;
+
+    try {
+        // LA MAGIA DEL SQL: 
+        // 1. Activa = 1 (No ha sido destruida por la guillotina)
+        // 2. Creada hace menos de 24 horas (INTERVAL 1 DAY)
+        // 3. Es mía o de alguien a quien sigo
+        const query = `
+            SELECT s.id, s.usuario_id, s.media_url, s.tipo, s.max_visualizaciones, s.fecha_creacion,
+                   u.username, u.avatar_url,
+                   (SELECT COUNT(*) FROM visualizaciones_stories WHERE story_id = s.id AND usuario_id = ?) as la_he_visto
+            FROM stories s
+            JOIN usuarios u ON s.usuario_id = u.id
+            WHERE s.activa = 1
+              AND s.fecha_creacion >= NOW() - INTERVAL 1 DAY
+              AND (s.usuario_id = ? OR s.usuario_id IN (SELECT seguido_id FROM seguidores WHERE seguidor_id = ?))
+            ORDER BY s.fecha_creacion ASC
+        `;
+
+        // Pasamos tu ID 3 veces para rellenar las interrogaciones
+        const [stories] = await db.query(query, [miId, miId, miId]);
+
+        // Formateamos las URLs para que lleven el candado seguro de HTTPS
+        const storiesFormateadas = stories.map(story => ({
+            ...story,
+            media_url: story.media_url ? `https://zync-app.net${story.media_url}` : null,
+            avatar_url: story.avatar_url ? `https://zync-app.net${story.avatar_url}` : null,
+            la_he_visto: story.la_he_visto > 0 // Lo convertimos en un true/false para Flutter
+        }));
+
+        res.json(storiesFormateadas);
+    } catch (error) {
+        console.error('Error al cargar stories:', error);
+        res.status(500).json({ error: 'Error al cargar historias' });
+    }
+});
+
+// ==========================================
+// RUTA: VER STORY Y LA GUILLOTINA (🪓)
+// ==========================================
+app.post('/api/stories/:id/ver', verificarToken, async (req, res) => {
+    const storyId = req.params.id;
+    const miId = req.usuario.id;
+
+    try {
+        // 1. Apuntamos que has visto la historia. 
+        // Usamos INSERT IGNORE por si ya la habías visto, para que MySQL no dé error de duplicado.
+        await db.query(
+            'INSERT IGNORE INTO visualizaciones_stories (story_id, usuario_id) VALUES (?, ?)',
+            [storyId, miId]
+        );
+
+        // 2. Comprobamos si es un Zync Drop y si sigue vivo
+        const [storyInfo] = await db.query('SELECT tipo, max_visualizaciones, activa FROM stories WHERE id = ?', [storyId]);
+
+        if (storyInfo.length > 0 && storyInfo[0].tipo === 'drop' && storyInfo[0].activa === 1) {
+            
+            // 3. Contamos cuántas personas DIFERENTES han visto este Drop
+            const [vistas] = await db.query('SELECT COUNT(*) as total FROM visualizaciones_stories WHERE story_id = ?', [storyId]);
+            const totalVistas = vistas[0].total;
+
+            // 4. ¿Llegó al límite impuesto por el creador?
+            if (totalVistas >= storyInfo[0].max_visualizaciones) {
+                
+                // ¡LA GUILLOTINA CAE! Apagamos el Drop para que no salga más en el Feed (activa = 0)
+                await db.query('UPDATE stories SET activa = 0 WHERE id = ?', [storyId]);
+
+                // ¡Avisamos a TODOS los móviles al instante por Socket.io para que la borren de la pantalla!
+                io.emit('drop_agotado', { storyId: parseInt(storyId) });
+                
+                console.log(`💥 Drop ${storyId} destruido al alcanzar ${totalVistas} visualizaciones.`);
+            }
+        }
+
+        res.json({ mensaje: 'Visualización registrada' });
+    } catch (error) {
+        console.error('Error al registrar vista de story:', error);
+        res.status(500).json({ error: 'Error interno al ver historia' });
+    }
+});
