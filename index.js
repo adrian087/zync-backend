@@ -12,11 +12,8 @@ const path = require('path');
 
 const app = express();
 const server = http.createServer(app);
-const io = socketIo(server, {
-    cors: {
-        origin: "*",
-        methods: ["GET", "POST", "PUT", "DELETE"]
-    }
+const io = new Server(server, {
+    cors: { origin: '*' }
 });
 
 const PORT = 3000;
@@ -73,8 +70,8 @@ const baseQueryPublicaciones = `
 
 const formatearPost = (post) => ({
     ...post,
-    avatar_url: post.avatar_url ? `http://209.38.196.225:3000${post.avatar_url}` : null,
-    original_avatar_url: post.original_avatar_url ? `http://209.38.196.225:3000${post.original_avatar_url}` : null
+    avatar_url: post.avatar_url ? `https://zync-app.net${post.avatar_url}` : null,
+    original_avatar_url: post.original_avatar_url ? `https://zync-app.net${post.original_avatar_url}` : null
 });
 
 // ==========================================
@@ -357,7 +354,7 @@ app.get('/api/perfil', verificarToken, async (req, res) => {
         res.json({
             username: usuarioData[0].username,
             bio: usuarioData[0].bio,
-            avatar_url: usuarioData[0].avatar_url ? `http://209.38.196.225:3000${usuarioData[0].avatar_url}` : null,
+            avatar_url: usuarioData[0].avatar_url ? `https://zync-app.net${usuarioData[0].avatar_url}` : null,
             totalPosts: publicaciones.length,
             publicaciones: publicaciones.map(formatearPost)
         });
@@ -389,7 +386,7 @@ app.put('/api/perfil/editar', verificarToken, upload.single('avatar'), async (re
         valores.push(usuarioId);
 
         await db.query(query, valores);
-        res.json({ mensaje: 'Perfil actualizado', avatar_url: avatarUrl ? `http://209.38.196.225:3000${avatarUrl}` : null });
+        res.json({ mensaje: 'Perfil actualizado', avatar_url: avatarUrl ? `https://zync-app.net${avatarUrl}` : null });
     } catch (error) {
         res.status(500).json({ error: 'Error al actualizar el perfil' });
     }
@@ -599,7 +596,7 @@ app.get('/api/usuarios/:id', verificarToken, async (req, res) => {
         res.json({
             usuario: {
                 ...usuarioData[0],
-                avatar_url: usuarioData[0].avatar_url ? `http://209.38.196.225:3000${usuarioData[0].avatar_url}` : null,
+                avatar_url: usuarioData[0].avatar_url ? `https://zync-app.net${usuarioData[0].avatar_url}` : null,
                 total_seguidores: seguidoresCount[0].total,
                 total_siguiendo: siguiendoCount[0].total,
                 totalPosts: publicaciones.length // 👈 Añadimos el total de posts
@@ -662,7 +659,7 @@ app.get('/api/mensajes/chats', verificarToken, async (req, res) => {
         // Formateamos las fotos de perfil
         const chatsFormateados = chats.map(chat => ({
             ...chat,
-            avatar_url: chat.avatar_url ? `http://209.38.196.225:3000${chat.avatar_url}` : null
+            avatar_url: chat.avatar_url ? `https://zync-app.net${chat.avatar_url}` : null
         }));
 
         res.json(chatsFormateados);
@@ -756,7 +753,7 @@ app.get('/api/notificaciones', verificarToken, async (req, res) => {
 
         const notificacionesFormateadas = notificaciones.map(noti => ({
             ...noti,
-            origen_avatar: noti.origen_avatar ? `http://209.38.196.225:3000${noti.origen_avatar}` : null
+            origen_avatar: noti.origen_avatar ? `https://zync-app.net${noti.origen_avatar}` : null
         }));
 
         res.json(notificacionesFormateadas);
