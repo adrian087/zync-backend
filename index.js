@@ -406,6 +406,36 @@ app.delete('/api/publicaciones/:id', verificarToken, async (req, res) => {
 });
 
 // ==========================================
+// RUTA: EDITAR PUBLICACIÓN
+// ==========================================
+app.put('/api/publicaciones/:id', verificarToken, async (req, res) => {
+    const { contenido } = req.body;
+    const publicacionId = req.params.id;
+    const miId = req.usuario.id;
+
+    if (!contenido || contenido.trim() === '') {
+        return res.status(400).json({ error: 'El contenido no puede estar vacío' });
+    }
+
+    try {
+        // La condición "usuario_id = ?" asegura que nadie pueda editar el Zync de otra persona
+        const [resultado] = await db.query(
+            'UPDATE publicaciones SET contenido = ? WHERE id = ? AND usuario_id = ?',
+            [contenido, publicacionId, miId]
+        );
+
+        if (resultado.affectedRows === 0) {
+            return res.status(403).json({ error: 'No autorizado o la publicación no existe' });
+        }
+
+        res.json({ mensaje: 'Zync actualizado correctamente' });
+    } catch (error) {
+        console.error('Error al editar Zync:', error);
+        res.status(500).json({ error: 'Error al editar la publicación' });
+    }
+});
+
+// ==========================================
 // RUTA: CREAR COMENTARIO
 // ==========================================
 app.post('/api/publicaciones/:id/comentarios', verificarToken, async (req, res) => {
