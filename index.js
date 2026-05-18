@@ -45,9 +45,6 @@ server.listen(PORT, () => {
     console.log(`✅ Servidor en http://209.38.196.225:${PORT}`);
 });
 
-// ==========================================
-// 🧠 SUPER-CONSULTA BASE (Re-Zyncs + Guardados)
-// ==========================================
 const baseQueryPublicaciones = `
     SELECT p.*, u.username, u.avatar_url,
            po.contenido AS original_contenido,
@@ -59,7 +56,6 @@ const baseQueryPublicaciones = `
            (SELECT COUNT(*) FROM publicaciones WHERE publicacion_original_id = COALESCE(p.publicacion_original_id, p.id)) AS total_rezyncs,
            (SELECT COUNT(*) FROM likes WHERE publicacion_id = COALESCE(p.publicacion_original_id, p.id) AND usuario_id = ?) AS le_has_dado_like,
            (SELECT COUNT(*) FROM publicaciones WHERE publicacion_original_id = COALESCE(p.publicacion_original_id, p.id) AND usuario_id = ?) AS lo_has_rezynceado,
-           -- 👇 NUEVO: Saber si tú tienes este post guardado 👇
            (SELECT COUNT(*) FROM guardados WHERE publicacion_id = COALESCE(p.publicacion_original_id, p.id) AND usuario_id = ?) AS lo_has_guardado,
            (SELECT GROUP_CONCAT(imagen_url) FROM publicaciones_imagenes WHERE publicacion_id = COALESCE(p.publicacion_original_id, p.id)) AS imagenes
     FROM publicaciones p
@@ -68,10 +64,19 @@ const baseQueryPublicaciones = `
     LEFT JOIN usuarios uo ON po.usuario_id = uo.id
 `;
 
+// ==========================================
+// 🧠 FORMATEADOR INTELIGENTE DE FOTOS
+// ==========================================
+const arreglarUrl = (url) => {
+    if (!url) return null;
+    if (url.startsWith('http')) return url; // Si ya tiene http (Google), lo dejamos
+    return `https://zync-app.net${url}`; // Si no, le ponemos nuestro dominio HTTPS
+};
+
 const formatearPost = (post) => ({
     ...post,
-    avatar_url: post.avatar_url ? `https://zync-app.net${post.avatar_url}` : null,
-    original_avatar_url: post.original_avatar_url ? `https://zync-app.net${post.original_avatar_url}` : null
+    avatar_url: arreglarUrl(post.avatar_url),
+    original_avatar_url: arreglarUrl(post.original_avatar_url)
 });
 
 // ==========================================
@@ -119,16 +124,11 @@ app.post('/api/auth/google', async (req, res) => {
     if (!email) return res.status(400).json({ error: 'Falta el correo electrónico de Google' });
 
     try {
-        // 1. Comprobamos si el usuario ya existe en nuestra base de datos
         const [users] = await db.query('SELECT * FROM usuarios WHERE email = ?', [email]);
         let usuario = users[0];
 
         if (!usuario) {
-            // 2. Si es la primera vez que entra, lo REGISTRAMOS automáticamente.
-            // Le generamos un 'username' base usando su correo (ej: "adrian_dev" de adrian_dev@gmail.com)
             const baseUsername = email.split('@')[0].toLowerCase().replace(/[^a-z0-9_]/g, '');
-
-            // Le ponemos una contraseña aleatoria imposible porque nunca la va a usar (entrará con Google)
             const randomPassword = await bcrypt.hash(Math.random().toString(36).slice(-10), 10);
 
             const [result] = await db.query(
@@ -136,7 +136,6 @@ app.post('/api/auth/google', async (req, res) => {
                 [baseUsername, email, randomPassword, photoUrl]
             );
 
-            // Rescatamos los datos del usuario recién creado
             usuario = {
                 id: result.insertId,
                 username: baseUsername,
@@ -145,8 +144,6 @@ app.post('/api/auth/google', async (req, res) => {
             };
         }
 
-        // 3. Generamos NUESTRO token de Zync (igual que en el login normal)
-        // IMPORTANTE: Asegúrate de que process.env.JWT_SECRET sea el mismo que usas en tu ruta de login
         const token = jwt.sign(
             { id: usuario.id }, 
             'MI_CLAVE_SECRETA_SUPER_SEGURA',
@@ -202,11 +199,10 @@ app.post('/api/publicaciones/:id/rezync', verificarToken, async (req, res) => {
             await db.query('INSERT INTO publicaciones (usuario_id, contenido, publicacion_original_id) VALUES (?, "", ?)', [miId, originalId]);
             rezynceado = true;
 
-            // 👇 NUEVO: GUARDAR NOTIFICACIÓN DE RE-ZYNC 👇
             const [propietarioData] = await db.query('SELECT usuario_id FROM publicaciones WHERE id = ?', [originalId]);
             const propietarioId = propietarioData[0].usuario_id;
 
-            if (propietarioId !== miId) { // No me notifico a mí mismo
+            if (propietarioId !== miId) { 
                 await db.query(
                     "INSERT INTO notificaciones (usuario_destino_id, usuario_origen_id, tipo, publicacion_id) VALUES (?, ?, 'rezync', ?)",
                     [propietarioId, miId, originalId]
@@ -230,7 +226,6 @@ app.post('/api/publicaciones/:id/guardar', verificarToken, async (req, res) => {
     const pId = req.params.id;
     const uId = req.usuario.id;
     try {
-        // Redirigir el guardado al post original si es un Re-Zync
         const [pub] = await db.query('SELECT publicacion_original_id FROM publicaciones WHERE id = ?', [pId]);
         if (pub.length === 0) return res.status(404).json({ error: 'No encontrado' });
         const targetId = pub[0].publicacion_original_id || pId;
@@ -260,7 +255,6 @@ app.get('/api/publicaciones/guardadas', verificarToken, async (req, res) => {
             WHERE g.usuario_id = ?
             ORDER BY g.fecha_guardado DESC
         `;
-        // Pasamos 3 veces req.usuario.id para baseQuery, y 1 vez para la condición WHERE de guardados
         const [publicaciones] = await db.query(query, [req.usuario.id, req.usuario.id, req.usuario.id, req.usuario.id]);
         res.json(publicaciones.map(formatearPost));
     } catch (error) {
@@ -274,13 +268,9 @@ app.get('/api/publicaciones/guardadas', verificarToken, async (req, res) => {
 app.get('/api/publicaciones', verificarToken, async (req, res) => {
     const limit = 10;
     const offset = ((parseInt(req.query.page) || 1) - 1) * limit;
-    const miId = req.usuario.id; // Guardamos tu ID en una variable para que quede más limpio
+    const miId = req.usuario.id; 
     
     try {
-        // Añadimos el WHERE mágico:
-        // 1. O es un post original (publicacion_original_id IS NULL)
-        // 2. O el Re-Zync lo he hecho yo mismo (p.usuario_id = ?)
-        // 3. O el Re-Zync lo ha hecho alguien a quien sigo (p.usuario_id IN ...)
         const query = baseQueryPublicaciones + `
             WHERE p.publicacion_original_id IS NULL 
                OR p.usuario_id = ? 
@@ -289,10 +279,7 @@ app.get('/api/publicaciones', verificarToken, async (req, res) => {
             LIMIT ? OFFSET ?
         `;
         
-        // CUIDADO AQUÍ: Ahora pasamos tu ID 5 veces. 
-        // (3 para los contadores de la super-consulta base + 2 para nuestras nuevas reglas del WHERE)
         const [publicaciones] = await db.query(query, [miId, miId, miId, miId, miId, limit, offset]);
-        
         res.json(publicaciones.map(formatearPost));
     } catch (error) {
         console.error('Error al cargar el feed Para ti:', error);
@@ -320,11 +307,10 @@ app.post('/api/publicaciones/:id/like', verificarToken, async (req, res) => {
             await db.query('INSERT INTO likes (usuario_id, publicacion_id) VALUES (?, ?)', [usuarioId, targetId]);
             liked = true;
 
-            // 👇 NUEVO: GUARDAR NOTIFICACIÓN DE LIKE 👇
             const [propietarioData] = await db.query('SELECT usuario_id FROM publicaciones WHERE id = ?', [targetId]);
             const propietarioId = propietarioData[0].usuario_id;
 
-            if (propietarioId !== usuarioId) { // No me notifico a mí mismo
+            if (propietarioId !== usuarioId) { 
                 await db.query(
                     "INSERT INTO notificaciones (usuario_destino_id, usuario_origen_id, tipo, publicacion_id) VALUES (?, ?, 'like', ?)",
                     [propietarioId, usuarioId, targetId]
@@ -354,7 +340,7 @@ app.get('/api/perfil', verificarToken, async (req, res) => {
         res.json({
             username: usuarioData[0].username,
             bio: usuarioData[0].bio,
-            avatar_url: usuarioData[0].avatar_url ? `https://zync-app.net${usuarioData[0].avatar_url}` : null,
+            avatar_url: arreglarUrl(usuarioData[0].avatar_url),
             totalPosts: publicaciones.length,
             publicaciones: publicaciones.map(formatearPost)
         });
@@ -418,7 +404,6 @@ app.put('/api/publicaciones/:id', verificarToken, async (req, res) => {
     }
 
     try {
-        // La condición "usuario_id = ?" asegura que nadie pueda editar el Zync de otra persona
         const [resultado] = await db.query(
             'UPDATE publicaciones SET contenido = ? WHERE id = ? AND usuario_id = ?',
             [contenido, publicacionId, miId]
@@ -453,11 +438,10 @@ app.post('/api/publicaciones/:id/comentarios', verificarToken, async (req, res) 
             [miId, targetId, contenido, comentario_padre_id || null]
         );
 
-        // 👇 NUEVO: GUARDAR NOTIFICACIÓN DE COMENTARIO 👇
         const [propietarioData] = await db.query('SELECT usuario_id FROM publicaciones WHERE id = ?', [targetId]);
         const propietarioId = propietarioData[0].usuario_id;
 
-        if (propietarioId !== miId) { // No me notifico a mí mismo
+        if (propietarioId !== miId) { 
             await db.query(
                 "INSERT INTO notificaciones (usuario_destino_id, usuario_origen_id, tipo, publicacion_id) VALUES (?, ?, 'comentario', ?)",
                 [propietarioId, miId, targetId]
@@ -471,14 +455,13 @@ app.post('/api/publicaciones/:id/comentarios', verificarToken, async (req, res) 
 });
 
 // ==========================================
-// RUTA: VER COMENTARIOS (Devuelve el padre)
+// RUTA: VER COMENTARIOS
 // ==========================================
 app.get('/api/publicaciones/:id/comentarios', verificarToken, async (req, res) => {
     try {
         const [pub] = await db.query('SELECT publicacion_original_id FROM publicaciones WHERE id = ?', [req.params.id]);
         const targetId = pub[0]?.publicacion_original_id || req.params.id;
 
-        // 👇 Ahora pedimos también c.comentario_padre_id en el SELECT
         const query = `
             SELECT c.id, c.usuario_id, c.contenido, c.fecha_creacion, c.comentario_padre_id, 
                    u.username, u.avatar_url 
@@ -541,7 +524,6 @@ app.post('/api/usuarios/:id/seguir', verificarToken, async (req, res) => {
         } else {
             await db.query('INSERT INTO seguidores (seguidor_id, seguido_id) VALUES (?, ?)', [miUsuarioId, usuarioAseguirId]);
 
-            // 👇 NUEVO: GUARDAR NOTIFICACIÓN DE SEGUIMIENTO 👇
             await db.query(
                 "INSERT INTO notificaciones (usuario_destino_id, usuario_origen_id, tipo, publicacion_id) VALUES (?, ?, 'seguir', NULL)",
                 [usuarioAseguirId, miUsuarioId]
@@ -574,7 +556,7 @@ app.get('/api/publicaciones/siguiendo', verificarToken, async (req, res) => {
 });
 
 // ==========================================
-// RUTA: PERFIL PÚBLICO (CORREGIDA)
+// RUTA: PERFIL PÚBLICO
 // ==========================================
 app.get('/api/usuarios/:id', verificarToken, async (req, res) => {
     const perfilId = req.params.id;
@@ -585,21 +567,19 @@ app.get('/api/usuarios/:id', verificarToken, async (req, res) => {
 
         const [siguiendoData] = await db.query('SELECT * FROM seguidores WHERE seguidor_id = ? AND seguido_id = ?', [miUsuarioId, perfilId]);
 
-        // 👇 NUEVO: Contamos los seguidores y a los que sigue este usuario 👇
         const [seguidoresCount] = await db.query('SELECT COUNT(*) as total FROM seguidores WHERE seguido_id = ?', [perfilId]);
         const [siguiendoCount] = await db.query('SELECT COUNT(*) as total FROM seguidores WHERE seguidor_id = ?', [perfilId]);
 
         const query = baseQueryPublicaciones + ' WHERE p.usuario_id = ? ORDER BY p.fecha_creacion DESC';
-        // Pasamos 3 veces tu ID para la baseQuery y 1 vez el perfilId para el WHERE
         const [publicaciones] = await db.query(query, [miUsuarioId, miUsuarioId, miUsuarioId, perfilId]);
 
         res.json({
             usuario: {
                 ...usuarioData[0],
-                avatar_url: usuarioData[0].avatar_url ? `https://zync-app.net${usuarioData[0].avatar_url}` : null,
+                avatar_url: arreglarUrl(usuarioData[0].avatar_url),
                 total_seguidores: seguidoresCount[0].total,
                 total_siguiendo: siguiendoCount[0].total,
-                totalPosts: publicaciones.length // 👈 Añadimos el total de posts
+                totalPosts: publicaciones.length 
             },
             le_sigo: siguiendoData.length > 0,
             publicaciones: publicaciones.map(formatearPost)
@@ -631,7 +611,6 @@ app.put('/api/usuarios/fcm-token', verificarToken, async (req, res) => {
 app.get('/api/mensajes/chats', verificarToken, async (req, res) => {
     const miId = req.usuario.id;
     try {
-        // Esta super-consulta agrupa los mensajes y saca el último de cada conversación
         const query = `
             SELECT 
                 u.id as otro_usuario_id, 
@@ -653,13 +632,11 @@ app.get('/api/mensajes/chats', verificarToken, async (req, res) => {
               )
             ORDER BY m.fecha_envio DESC
         `;
-        // Le pasamos tu ID 5 veces para rellenar las interrogaciones de la consulta
         const [chats] = await db.query(query, [miId, miId, miId, miId, miId]);
 
-        // Formateamos las fotos de perfil
         const chatsFormateados = chats.map(chat => ({
             ...chat,
-            avatar_url: chat.avatar_url ? `https://zync-app.net${chat.avatar_url}` : null
+            avatar_url: arreglarUrl(chat.avatar_url)
         }));
 
         res.json(chatsFormateados);
@@ -684,7 +661,6 @@ app.get('/api/mensajes/:otroUsuarioId', verificarToken, async (req, res) => {
         `;
         const [mensajes] = await db.query(query, [miId, otroId, otroId, miId]);
 
-        // Cuando entramos al chat, marcamos los mensajes que nos mandaron como leídos
         await db.query('UPDATE mensajes SET leido = 1 WHERE remitente_id = ? AND destinatario_id = ?', [otroId, miId]);
 
         res.json(mensajes);
@@ -702,13 +678,11 @@ app.post('/api/mensajes/:otroUsuarioId', verificarToken, async (req, res) => {
     if (!contenido || contenido.trim() === '') return res.status(400).json({ error: 'Mensaje vacío' });
 
     try {
-        // Guardamos el mensaje en MySQL
         const [resultado] = await db.query(
             'INSERT INTO mensajes (remitente_id, destinatario_id, contenido) VALUES (?, ?, ?)',
             [miId, otroId, contenido]
         );
 
-        // Recuperamos el mensaje recién guardado con el nombre del remitente
         const [nuevoMensaje] = await db.query(`
             SELECT m.*, u.username as remitente_username
             FROM mensajes m
@@ -716,7 +690,6 @@ app.post('/api/mensajes/:otroUsuarioId', verificarToken, async (req, res) => {
             WHERE m.id = ?
         `, [resultado.insertId]);
 
-        // 👇 MAGIA EN TIEMPO REAL: Emitimos el mensaje a todos los clientes 👇
         io.emit('nuevo_mensaje', nuevoMensaje[0]);
 
         res.status(201).json(nuevoMensaje[0]);
@@ -753,7 +726,7 @@ app.get('/api/notificaciones', verificarToken, async (req, res) => {
 
         const notificacionesFormateadas = notificaciones.map(noti => ({
             ...noti,
-            origen_avatar: noti.origen_avatar ? `https://zync-app.net${noti.origen_avatar}` : null
+            origen_avatar: arreglarUrl(noti.origen_avatar)
         }));
 
         res.json(notificacionesFormateadas);
@@ -780,8 +753,6 @@ app.put('/api/notificaciones/leidas', verificarToken, async (req, res) => {
 app.delete('/api/usuarios/me', verificarToken, async (req, res) => {
     const miId = req.usuario.id;
     try {
-        // Al borrar el usuario, el ON DELETE CASCADE de MySQL limpiará automáticamente
-        // sus Zyncs, likes, comentarios, guardados, seguidores y notificaciones.
         await db.query('DELETE FROM usuarios WHERE id = ?', [miId]);
         res.json({ mensaje: 'Cuenta eliminada para siempre' });
     } catch (error) {
@@ -829,13 +800,11 @@ app.put('/api/usuarios/me/password', verificarToken, async (req, res) => {
     const { password_actual, password_nueva } = req.body;
     if (!password_actual || !password_nueva) return res.status(400).json({ error: 'Faltan datos' });
     try {
-        // Comprobar que la contraseña actual es correcta
         const [usuarios] = await db.query('SELECT password FROM usuarios WHERE id = ?', [req.usuario.id]);
         const passwordCorrecta = await bcrypt.compare(password_actual, usuarios[0].password);
 
         if (!passwordCorrecta) return res.status(401).json({ error: 'La contraseña actual es incorrecta' });
 
-        // Cifrar la nueva contraseña
         const salt = await bcrypt.genSalt(10);
         const hashedNueva = await bcrypt.hash(password_nueva, salt);
 
@@ -850,14 +819,13 @@ app.put('/api/usuarios/me/password', verificarToken, async (req, res) => {
 // RUTA: CREAR STORY O ZYNC DROP (🔥)
 // ==========================================
 app.post('/api/stories', verificarToken, upload.single('media'), async (req, res) => {
-    const { tipo, max_visualizaciones } = req.body; // 'normal' o 'drop'
+    const { tipo, max_visualizaciones } = req.body; 
     const miId = req.usuario.id;
     const mediaUrl = req.file ? `/uploads/${req.file.filename}` : null;
 
     if (!mediaUrl) return res.status(400).json({ error: 'Falta la imagen o vídeo' });
 
     try {
-        // Si es un drop, guardamos el límite (por defecto 10 si no envían nada)
         const maxVis = tipo === 'drop' ? (max_visualizaciones || 10) : null;
         
         const [resultado] = await db.query(
@@ -879,10 +847,6 @@ app.get('/api/stories', verificarToken, async (req, res) => {
     const miId = req.usuario.id;
 
     try {
-        // LA MAGIA DEL SQL: 
-        // 1. Activa = 1 (No ha sido destruida por la guillotina)
-        // 2. Creada hace menos de 24 horas (INTERVAL 1 DAY)
-        // 3. Es mía o de alguien a quien sigo
         const query = `
             SELECT s.id, s.usuario_id, s.media_url, s.tipo, s.max_visualizaciones, s.fecha_creacion,
                    u.username, u.avatar_url,
@@ -895,15 +859,13 @@ app.get('/api/stories', verificarToken, async (req, res) => {
             ORDER BY s.fecha_creacion ASC
         `;
 
-        // Pasamos tu ID 3 veces para rellenar las interrogaciones
         const [stories] = await db.query(query, [miId, miId, miId]);
 
-        // Formateamos las URLs para que lleven el candado seguro de HTTPS
         const storiesFormateadas = stories.map(story => ({
             ...story,
-            media_url: story.media_url ? `https://zync-app.net${story.media_url}` : null,
-            avatar_url: story.avatar_url ? `https://zync-app.net${story.avatar_url}` : null,
-            la_he_visto: story.la_he_visto > 0 // Lo convertimos en un true/false para Flutter
+            media_url: story.media_url ? `https://zync-app.net${story.media_url}` : null, 
+            avatar_url: arreglarUrl(story.avatar_url),
+            la_he_visto: story.la_he_visto > 0 
         }));
 
         res.json(storiesFormateadas);
@@ -921,29 +883,21 @@ app.post('/api/stories/:id/ver', verificarToken, async (req, res) => {
     const miId = req.usuario.id;
 
     try {
-        // 1. Apuntamos que has visto la historia. 
-        // Usamos INSERT IGNORE por si ya la habías visto, para que MySQL no dé error de duplicado.
         await db.query(
             'INSERT IGNORE INTO visualizaciones_stories (story_id, usuario_id) VALUES (?, ?)',
             [storyId, miId]
         );
 
-        // 2. Comprobamos si es un Zync Drop y si sigue vivo
         const [storyInfo] = await db.query('SELECT tipo, max_visualizaciones, activa FROM stories WHERE id = ?', [storyId]);
 
         if (storyInfo.length > 0 && storyInfo[0].tipo === 'drop' && storyInfo[0].activa === 1) {
             
-            // 3. Contamos cuántas personas DIFERENTES han visto este Drop
             const [vistas] = await db.query('SELECT COUNT(*) as total FROM visualizaciones_stories WHERE story_id = ?', [storyId]);
             const totalVistas = vistas[0].total;
 
-            // 4. ¿Llegó al límite impuesto por el creador?
             if (totalVistas >= storyInfo[0].max_visualizaciones) {
-                
-                // ¡LA GUILLOTINA CAE! Apagamos el Drop para que no salga más en el Feed (activa = 0)
                 await db.query('UPDATE stories SET activa = 0 WHERE id = ?', [storyId]);
 
-                // ¡Avisamos a TODOS los móviles al instante por Socket.io para que la borren de la pantalla!
                 io.emit('drop_agotado', { storyId: parseInt(storyId) });
                 
                 console.log(`💥 Drop ${storyId} destruido al alcanzar ${totalVistas} visualizaciones.`);
