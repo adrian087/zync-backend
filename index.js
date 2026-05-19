@@ -938,3 +938,21 @@ app.post('/api/stories/:id/like', verificarToken, async (req, res) => {
         res.status(500).json({ error: 'Error del servidor' });
     }
 });
+
+// ==========================================
+// RUTA: OBTENER CONTADORES DE BADGES
+// ==========================================
+app.get('/api/badges', verificarToken, async (req, res) => {
+    const miId = req.usuario.id;
+    try {
+        // Contamos cuántas notificaciones NO están leídas
+        const [notis] = await db.query('SELECT COUNT(*) as total FROM notificaciones WHERE usuario_destino_id = ? AND leida = 0', [miId]);
+        // Contamos cuántos mensajes NO están leídos
+        const [mensajes] = await db.query('SELECT COUNT(*) as total FROM mensajes WHERE destinatario_id = ? AND leido = 0', [miId]);
+        
+        res.json({ notificaciones: notis[0].total, mensajes: mensajes[0].total });
+    } catch (error) {
+        console.error('Error al cargar badges:', error);
+        res.status(500).json({ error: 'Error al cargar badges' });
+    }
+});
