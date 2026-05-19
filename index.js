@@ -910,3 +910,31 @@ app.post('/api/stories/:id/ver', verificarToken, async (req, res) => {
         res.status(500).json({ error: 'Error interno al ver historia' });
     }
 });
+
+// ==========================================
+// RUTA: DAR LIKE A UNA STORY Y NOTIFICAR (❤️)
+// ==========================================
+app.post('/api/stories/:id/like', verificarToken, async (req, res) => {
+    const storyId = req.params.id;
+    const miId = req.usuario.id;
+
+    try {
+        const [story] = await db.query('SELECT usuario_id FROM stories WHERE id = ?', [storyId]);
+        if (story.length === 0) return res.status(404).json({ error: 'Story no encontrada' });
+        
+        const propietarioId = story[0].usuario_id;
+        
+        // Generamos la notificación en la campanita
+        // Usamos el tipo "like" para que la app lo lea automáticamente como un me gusta
+        if (propietarioId !== miId) {
+            await db.query(
+                "INSERT INTO notificaciones (usuario_destino_id, usuario_origen_id, tipo, publicacion_id) VALUES (?, ?, 'like', NULL)",
+                [propietarioId, miId]
+            );
+        }
+        res.json({ success: true, mensaje: 'Notificación enviada' });
+    } catch (error) {
+        console.error('Error al dar like a la historia:', error);
+        res.status(500).json({ error: 'Error del servidor' });
+    }
+});
