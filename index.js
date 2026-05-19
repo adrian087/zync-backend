@@ -645,12 +645,18 @@ app.get('/api/mensajes/chats', verificarToken, async (req, res) => {
     }
 });
 
+
 // 2. Obtener historial de chat con un usuario específico
 app.get('/api/mensajes/:otroUsuarioId', verificarToken, async (req, res) => {
     const miId = req.usuario.id;
-    const otroId = req.params.otroUsuarioId;
+    // 👇 Forzamos a que el ID sea numérico para que MySQL no falle silenciosamente 👇
+    const otroId = parseInt(req.params.otroUsuarioId, 10); 
 
     try {
+        // 1. PRIMERO marcamos los mensajes como leídos
+        await db.query('UPDATE mensajes SET leido = 1 WHERE remitente_id = ? AND destinatario_id = ?', [otroId, miId]);
+
+        // 2. LUEGO obtenemos los mensajes para mandarlos a Flutter
         const query = `
             SELECT m.*, u.username as remitente_username
             FROM mensajes m
@@ -661,10 +667,9 @@ app.get('/api/mensajes/:otroUsuarioId', verificarToken, async (req, res) => {
         `;
         const [mensajes] = await db.query(query, [miId, otroId, otroId, miId]);
 
-        await db.query('UPDATE mensajes SET leido = 1 WHERE remitente_id = ? AND destinatario_id = ?', [otroId, miId]);
-
         res.json(mensajes);
     } catch (error) {
+        console.error('Error en historial de mensajes:', error);
         res.status(500).json({ error: 'Error al cargar mensajes' });
     }
 });
