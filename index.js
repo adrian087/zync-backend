@@ -963,29 +963,29 @@ app.get('/api/badges', verificarToken, async (req, res) => {
 });
 
 // ==========================================
-// RUTA: VER VISUALIZACIONES DE MI STORY (👁️)
+// RUTA: VER VISUALIZACIONES DE MI STORY
 // ==========================================
 app.get('/api/stories/:id/vistas', verificarToken, async (req, res) => {
     const storyId = req.params.id;
     const miId = req.usuario.id;
 
     try {
-        // 1. Comprobamos que la historia es realmente tuya
         const [story] = await db.query('SELECT usuario_id FROM stories WHERE id = ?', [storyId]);
         if (story.length === 0 || story[0].usuario_id !== miId) {
             return res.status(403).json({ error: 'No autorizado para ver estas estadísticas' });
         }
 
-        // 2. Buscamos quién la ha visto (¡SIN la columna inventada de fecha!)
+        // 👇 MAGIA SQL: Filtramos para que u.id NO sea el tuyo 👇
         const query = `
             SELECT u.id, u.username, u.avatar_url
             FROM visualizaciones_stories v
             JOIN usuarios u ON v.usuario_id = u.id
-            WHERE v.story_id = ?
+            WHERE v.story_id = ? AND u.id != ?
         `;
-        const [vistas] = await db.query(query, [storyId]);
+        
+        // 👇 Pasamos "miId" como segundo parámetro para rellenar la interrogación 👇
+        const [vistas] = await db.query(query, [storyId, miId]);
 
-        // Formateamos las fotos de perfil con el https
         const vistasFormateadas = vistas.map(v => ({
             ...v,
             avatar_url: arreglarUrl(v.avatar_url)
