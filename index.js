@@ -961,3 +961,66 @@ app.get('/api/badges', verificarToken, async (req, res) => {
         res.status(500).json({ error: 'Error al cargar badges' });
     }
 });
+
+// ==========================================
+// RUTA: VER VISUALIZACIONES DE MI STORY
+// ==========================================
+app.get('/api/stories/:id/vistas', verificarToken, async (req, res) => {
+    const storyId = req.params.id;
+    const miId = req.usuario.id;
+
+    try {
+        // 1. Comprobamos que la historia es realmente tuya
+        const [story] = await db.query('SELECT usuario_id FROM stories WHERE id = ?', [storyId]);
+        if (story.length === 0 || story[0].usuario_id !== miId) {
+            return res.status(403).json({ error: 'No autorizado para ver estas estadísticas' });
+        }
+
+        // 2. Buscamos quién la ha visto
+        const query = `
+            SELECT u.id, u.username, u.avatar_url, v.fecha_vista
+            FROM visualizaciones_stories v
+            JOIN usuarios u ON v.usuario_id = u.id
+            WHERE v.story_id = ?
+            ORDER BY v.fecha_vista DESC
+        `;
+        const [vistas] = await db.query(query, [storyId]);
+
+        // Formateamos las fotos de perfil con el https
+        const vistasFormateadas = vistas.map(v => ({
+            ...v,
+            avatar_url: arreglarUrl(v.avatar_url)
+        }));
+
+        res.json(vistasFormateadas);
+    } catch (error) {
+        console.error('Error al cargar vistas:', error);
+        res.status(500).json({ error: 'Error interno al cargar visualizaciones' });
+    }
+});
+
+// ==========================================
+// RUTA: ELIMINAR MI PROPIA STORY
+// ==========================================
+app.delete('/api/stories/:id', verificarToken, async (req, res) => {
+    const storyId = req.params.id;
+    const miId = req.usuario.id;
+
+    try {
+        // Borramos físicamente la historia, solo si tú eres el dueño
+        const [resultado] = await db.query('DELETE FROM stories WHERE id = ? AND usuario_id = ?', [storyId, miId]);
+        
+        if (resultado.affectedRows === 0) {
+            return res.status(403).json({ error: 'No autorizado o la historia ya no existe' });
+        }
+
+        // ¡MAGIA! Reutilizamos el evento Socket.io de la guillotina para avisar 
+        // a todos los móviles de que la borren de sus radares en tiempo real.
+        io.emit('drop_agotado', { storyId: parseInt(storyId) });
+
+        res.json({ mensaje: 'Historia eliminada para siempre' });
+    } catch (error) {
+        console.error('Error al eliminar historia:', error);
+        res.status(500).json({ error: 'Error al eliminar historia' });
+    }
+});
