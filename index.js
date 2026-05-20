@@ -963,7 +963,7 @@ app.get('/api/badges', verificarToken, async (req, res) => {
 });
 
 // ==========================================
-// RUTA: VER VISUALIZACIONES DE MI STORY
+// RUTA: VER VISUALIZACIONES DE MI STORY (👁️)
 // ==========================================
 app.get('/api/stories/:id/vistas', verificarToken, async (req, res) => {
     const storyId = req.params.id;
@@ -976,13 +976,12 @@ app.get('/api/stories/:id/vistas', verificarToken, async (req, res) => {
             return res.status(403).json({ error: 'No autorizado para ver estas estadísticas' });
         }
 
-        // 2. Buscamos quién la ha visto
+        // 2. Buscamos quién la ha visto (¡SIN la columna inventada de fecha!)
         const query = `
-            SELECT u.id, u.username, u.avatar_url, v.fecha_vista
+            SELECT u.id, u.username, u.avatar_url
             FROM visualizaciones_stories v
             JOIN usuarios u ON v.usuario_id = u.id
             WHERE v.story_id = ?
-            ORDER BY v.fecha_vista DESC
         `;
         const [vistas] = await db.query(query, [storyId]);
 
