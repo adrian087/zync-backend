@@ -9,6 +9,17 @@ const verificarToken = require('./middlewares/auth');
 const multer = require('multer');
 const path = require('path');
 
+const nodemailer = require('nodemailer');
+
+// 👇 CONFIGURACIÓN DEL CORREO 👇
+const transporter = nodemailer.createTransport({
+    service: 'gmail',
+    auth: {
+        user: 'zyncappinfo@gmail.com',
+        pass: 'oslb thsf zgmh pult'
+    }
+});
+
 // ==========================================
 // 1. INICIALIZAMOS FIREBASE ADMIN SDK ☁️
 // ==========================================
@@ -566,4 +577,83 @@ app.put('/api/usuarios/me/password', verificarToken, async (req, res) => {
     const h = await bcrypt.hash(req.body.password_nueva, await bcrypt.genSalt(10));
     await db.query('UPDATE usuarios SET password = ? WHERE id = ?', [h, req.usuario.id]);
     res.json({ mensaje: 'OK' });
+});
+
+// ==========================================
+// RUTAS: RECUPERACIÓN DE CONTRASEÑA
+// ==========================================
+
+// 1. Solicitar código de 6 dígitos
+app.post('/api/auth/forgot-password', async (req, res) => {
+    const { email } = req.body;
+    try {
+        const [usuarios] = await db.query('SELECT * FROM usuarios WHERE email = ?', [email]);
+        if (usuarios.length === 0) return res.status(404).json({ error: 'Este correo no está registrado en Zync' });
+
+        // Generar código de 6 dígitos (ej: 482910)
+        const codigo = Math.floor(100000 + Math.random() * 900000).toString();
+
+        // Borramos códigos antiguos de este correo por limpieza y metemos el nuevo (caduca en 5 min)
+        await db.query('DELETE FROM recuperacion_passwords WHERE email = ?', [email]);
+        await db.query('INSERT INTO recuperacion_passwords (email, codigo, expira_en) VALUES (?, ?, DATE_ADD(NOW(), INTERVAL 5 MINUTE))', [email, codigo]);
+
+        // Enviar el correo
+        const mailOptions = {
+            from: '"Zync App" <zyncappinfo@gmail.com>',
+            to: email,
+            subject: 'Código de recuperación de contraseña',
+            html: `<h2>Hola @${usuarios[0].username},</h2>
+                   <p>Has solicitado restablecer tu contraseña. Tu código de verificación es:</p>
+                   <h1 style="color: #4CAF50; letter-spacing: 5px;">${codigo}</h1>
+                   <p>Este código <b>caducará en 5 minutos</b>. Si no has sido tú, ignora este mensaje.</p>`
+        };
+
+        await transporter.sendMail(mailOptions);
+        res.json({ mensaje: 'Código enviado con éxito' });
+    } catch (error) {
+        console.error(error);
+        res.status(500).json({ error: 'Error al enviar el correo' });
+    }
+});
+
+// 2. Verificar si el código es correcto y no ha caducado
+app.post('/api/auth/verify-reset-code', async (req, res) => {
+    const { email, codigo } = req.body;
+    try {
+        const [registro] = await db.query('SELECT * FROM recuperacion_passwords WHERE email = ? AND codigo = ?', [email, codigo]);
+        if (registro.length === 0) return res.status(400).json({ error: 'El código es incorrecto.' });
+
+        const ahora = new Date();
+        const expiracion = new Date(registro[0].expira_en);
+
+        if (ahora > expiracion) {
+            return res.status(400).json({ error: 'Este código ha caducado. Por favor, solicita uno nuevo.' });
+        }
+
+        res.json({ mensaje: 'Código válido' });
+    } catch (error) {
+        res.status(500).json({ error: 'Error interno' });
+    }
+});
+
+// 3. Cambiar la contraseña finalmente
+app.post('/api/auth/reset-password', async (req, res) => {
+    const { email, codigo, nuevaPassword } = req.body;
+    try {
+        // Volvemos a comprobar por seguridad extrema
+        const [registro] = await db.query('SELECT * FROM recuperacion_passwords WHERE email = ? AND codigo = ? AND expira_en > NOW()', [email, codigo]);
+        if (registro.length === 0) return res.status(400).json({ error: 'El código es inválido o ha caducado.' });
+
+        // Encriptar nueva contraseña
+        const salt = await bcrypt.genSalt(10);
+        const hashedPassword = await bcrypt.hash(nuevaPassword, salt);
+
+        // Actualizar contraseña y borrar el código
+        await db.query('UPDATE usuarios SET password = ? WHERE email = ?', [hashedPassword, email]);
+        await db.query('DELETE FROM recuperacion_passwords WHERE email = ?', [email]);
+
+        res.json({ mensaje: 'Contraseña cambiada con éxito' });
+    } catch (error) {
+        res.status(500).json({ error: 'Error al cambiar contraseña' });
+    }
 });
