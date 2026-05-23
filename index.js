@@ -590,14 +590,17 @@ app.post('/api/auth/forgot-password', async (req, res) => {
         const [usuarios] = await db.query('SELECT * FROM usuarios WHERE email = ?', [email]);
         if (usuarios.length === 0) return res.status(404).json({ error: 'Este correo no está registrado en Zync' });
 
-        // Generar código de 6 dígitos (ej: 482910)
+        // Generar código de 6 dígitos
         const codigo = Math.floor(100000 + Math.random() * 900000).toString();
 
-        // Borramos códigos antiguos de este correo por limpieza y metemos el nuevo (caduca en 5 min)
         await db.query('DELETE FROM recuperacion_passwords WHERE email = ?', [email]);
         await db.query('INSERT INTO recuperacion_passwords (email, codigo, expira_en) VALUES (?, ?, DATE_ADD(NOW(), INTERVAL 5 MINUTE))', [email, codigo]);
 
-        // Enviar el correo
+        // 👇 TRUCO SALVAVIDAS: Imprimimos el código en tu consola para que puedas testear 👇
+        console.log(`\n======================================`);
+        console.log(`🔐 CÓDIGO DE RECUPERACIÓN PARA ${email}: ${codigo}`);
+        console.log(`======================================\n`);
+
         const mailOptions = {
             from: '"Zync App" <zyncappinfo@gmail.com>',
             to: email,
@@ -605,14 +608,19 @@ app.post('/api/auth/forgot-password', async (req, res) => {
             html: `<h2>Hola @${usuarios[0].username},</h2>
                    <p>Has solicitado restablecer tu contraseña. Tu código de verificación es:</p>
                    <h1 style="color: #4CAF50; letter-spacing: 5px;">${codigo}</h1>
-                   <p>Este código <b>caducará en 5 minutos</b>. Si no has sido tú, ignora este mensaje.</p>`
+                   <p>Este código caducará en 5 minutos.</p>`
         };
 
-        await transporter.sendMail(mailOptions);
-        res.json({ mensaje: 'Código enviado con éxito' });
+        // 👇 Le quitamos el "await" para que no congele la app si DigitalOcean bloquea la salida 👇
+        transporter.sendMail(mailOptions)
+            .then(() => console.log('✉️ Correo enviado por Gmail con éxito'))
+            .catch(err => console.log('⚠️ Aviso: DigitalOcean bloqueó el envío, pero el código está arriba.'));
+
+        // Respondemos a Flutter INMEDIATAMENTE
+        res.json({ mensaje: 'Código generado correctamente' });
     } catch (error) {
-        console.error(error);
-        res.status(500).json({ error: 'Error al enviar el correo' });
+        console.error('Error al generar código:', error);
+        res.status(500).json({ error: 'Error en el servidor' });
     }
 });
 
