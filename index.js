@@ -16,7 +16,7 @@ const transporter = nodemailer.createTransport({
     service: 'gmail',
     auth: {
         user: 'zyncappinfo@gmail.com',
-        pass: 'oslb thsf zgmh pult'
+        pass: 'oslbthsfzgmhpult'
     }
 });
 
