@@ -800,3 +800,19 @@ app.post('/api/usuarios/:id/bloquear', verificarToken, async (req, res) => {
         res.status(500).json({ error: 'Error interno' });
     }
 });
+
+app.get('/api/usuarios/bloqueados', verificarToken, async (req, res) => {
+    const miId = req.usuario.id;
+    try {
+        const [b] = await db.query(
+            `SELECT u.id, u.username, u.avatar_url 
+             FROM bloqueos b 
+             JOIN usuarios u ON b.bloqueado_id = u.id 
+             WHERE b.bloqueador_id = ?`,
+            [miId]
+        );
+        res.json(b.map(u => ({ ...u, avatar_url: arreglarUrl(u.avatar_url) })));
+    } catch (e) {
+        res.status(500).json({ error: 'Error al obtener la lista de bloqueados' });
+    }
+});
