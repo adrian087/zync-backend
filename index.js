@@ -245,8 +245,27 @@ app.get('/api/publicaciones', verificarToken, async (req, res) => {
     const offset = ((parseInt(req.query.page) || 1) - 1) * limit;
     const miId = req.usuario.id; 
     try {
-        const query = baseQueryPublicaciones + ` WHERE p.publicacion_original_id IS NULL OR p.usuario_id = ? OR p.usuario_id IN (SELECT seguido_id FROM seguidores WHERE seguidor_id = ?) ORDER BY p.fecha_creacion DESC LIMIT ? OFFSET ?`;
-        const [p] = await db.query(query, [miId, miId, miId, miId, miId, limit, offset]);
+        const query = baseQueryPublicaciones + ` 
+            WHERE (p.publicacion_original_id IS NULL OR p.usuario_id = ? OR p.usuario_id IN (SELECT seguido_id FROM seguidores WHERE seguidor_id = ?))
+            AND p.usuario_id NOT IN (SELECT bloqueado_id FROM bloqueos WHERE bloqueador_id = ?)
+            AND p.usuario_id NOT IN (SELECT bloqueador_id FROM bloqueos WHERE bloqueado_id = ?)
+            ORDER BY p.fecha_creacion DESC LIMIT ? OFFSET ?`;
+        const [p] = await db.query(query, [miId, miId, miId, miId, miId, miId, miId, limit, offset]);
+        res.json(p.map(formatearPost));
+    } catch (e) { res.status(500).json({ error: 'Error' }); }
+});
+
+app.get('/api/publicaciones/siguiendo', verificarToken, async (req, res) => {
+    const limit = 10; const offset = ((parseInt(req.query.page) || 1) - 1) * limit;
+    const miId = req.usuario.id;
+    try {
+        const query = baseQueryPublicaciones + ` 
+            JOIN seguidores s ON p.usuario_id = s.seguido_id 
+            WHERE s.seguidor_id = ?
+            AND p.usuario_id NOT IN (SELECT bloqueado_id FROM bloqueos WHERE bloqueador_id = ?)
+            AND p.usuario_id NOT IN (SELECT bloqueador_id FROM bloqueos WHERE bloqueado_id = ?)
+            ORDER BY p.fecha_creacion DESC LIMIT ? OFFSET ?`;
+        const [p] = await db.query(query, [miId, miId, miId, miId, miId, miId, limit, offset]);
         res.json(p.map(formatearPost));
     } catch (e) { res.status(500).json({ error: 'Error' }); }
 });
@@ -395,10 +414,16 @@ app.get('/api/publicaciones/guardadas', verificarToken, async (req, res) => {
     } catch (e) { res.status(500).json({ error: 'Error' }); }
 });
 
-app.get('/api/usuarios/buscar', verificarToken, async (req, res) => {
+app.get('/api/publicaciones/buscar', verificarToken, async (req, res) => {
     if (!req.query.q) return res.json([]);
-    const [u] = await db.query('SELECT id, username, avatar_url FROM usuarios WHERE username LIKE ? LIMIT 15', [`%${req.query.q}%`]);
-    res.json(u.map(formatearPost));
+    const miId = req.usuario.id;
+    const q = baseQueryPublicaciones + ` 
+        WHERE (p.contenido LIKE ? OR po.contenido LIKE ?)
+        AND p.usuario_id NOT IN (SELECT bloqueado_id FROM bloqueos WHERE bloqueador_id = ?)
+        AND p.usuario_id NOT IN (SELECT bloqueador_id FROM bloqueos WHERE bloqueado_id = ?)
+        ORDER BY p.fecha_creacion DESC LIMIT 20`;
+    const [p] = await db.query(q, [miId, miId, miId, `%${req.query.q}%`, `%${req.query.q}%`, miId, miId]);
+    res.json(p.map(formatearPost));
 });
 
 app.get('/api/publicaciones/buscar', verificarToken, async (req, res) => {
@@ -556,8 +581,15 @@ app.post('/api/stories', verificarToken, upload.single('media'), async (req, res
 
 app.get('/api/stories', verificarToken, async (req, res) => {
     const miId = req.usuario.id;
-    const q = `SELECT s.*, u.username, u.avatar_url, (SELECT COUNT(*) FROM visualizaciones_stories WHERE story_id = s.id AND usuario_id = ?) as la_he_visto FROM stories s JOIN usuarios u ON s.usuario_id = u.id WHERE s.activa = 1 AND s.fecha_creacion >= NOW() - INTERVAL 1 DAY AND (s.usuario_id = ? OR s.usuario_id IN (SELECT seguido_id FROM seguidores WHERE seguidor_id = ?)) ORDER BY s.fecha_creacion ASC`;
-    const [s] = await db.query(q, [miId, miId, miId]);
+    const q = `SELECT s.*, u.username, u.avatar_url, (SELECT COUNT(*) FROM visualizaciones_stories WHERE story_id = s.id AND usuario_id = ?) as la_he_visto 
+               FROM stories s 
+               JOIN usuarios u ON s.usuario_id = u.id 
+               WHERE s.activa = 1 AND s.fecha_creacion >= NOW() - INTERVAL 1 DAY 
+               AND (s.usuario_id = ? OR s.usuario_id IN (SELECT seguido_id FROM seguidores WHERE seguidor_id = ?))
+               AND s.usuario_id NOT IN (SELECT bloqueado_id FROM bloqueos WHERE bloqueador_id = ?)
+               AND s.usuario_id NOT IN (SELECT bloqueador_id FROM bloqueos WHERE bloqueado_id = ?)
+               ORDER BY s.fecha_creacion ASC`;
+    const [s] = await db.query(q, [miId, miId, miId, miId, miId]);
     res.json(s.map(st => ({ ...st, media_url: arreglarUrl(st.media_url), avatar_url: arreglarUrl(st.avatar_url), la_he_visto: st.la_he_visto > 0 })));
 });
 
