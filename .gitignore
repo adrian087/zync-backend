@@ -1,3 +1,5 @@
 node_modules/
 .env
 .DS_StoreserviceAccountKey.json
+firebase-key.json
+serviceAccountKey.json
