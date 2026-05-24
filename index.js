@@ -13,15 +13,6 @@ const path = require('path');
 const { Resend } = require('resend');
 const resend = new Resend('re_J3dS5o4t_9eJ6RsPF7DHT1KjihAtHedzW');
 
-// 👇 CONFIGURACIÓN DEL CORREO 👇
-const transporter = nodemailer.createTransport({
-    service: 'gmail',
-    auth: {
-        user: 'zyncappinfo@gmail.com',
-        pass: 'oslbthsfzgmhpult'
-    }
-});
-
 // ==========================================
 // 1. INICIALIZAMOS FIREBASE ADMIN SDK ☁️
 // ==========================================
@@ -137,6 +128,7 @@ server.listen(PORT, () => console.log(`✅ Servidor en http://209.38.196.225:${P
 // ==========================================
 // RUTA: REGISTRO Y LOGIN (Auth)
 // ==========================================
+
 app.post('/api/registro', async (req, res) => {
     const { nombres, apellidos, username, email, password } = req.body;
     if (!nombres || !apellidos || !username || !email || !password) return res.status(400).json({ error: 'Faltan datos obligatorios' });
@@ -144,6 +136,27 @@ app.post('/api/registro', async (req, res) => {
         const salt = await bcrypt.genSalt(10);
         const hashed = await bcrypt.hash(password, salt);
         const [r] = await db.query('INSERT INTO usuarios (nombres, apellidos, username, email, password) VALUES (?, ?, ?, ?, ?)', [nombres, apellidos, username, email, hashed]);
+        
+        // 👇 MAGIA: ENVIAR CORREO DE BIENVENIDA (Sin await para que la app no tenga que esperar) 👇
+        resend.emails.send({
+            from: 'Zync App <no-reply@zync-app.net>',
+            to: email,
+            subject: '¡Bienvenido a Zync, @' + username + '! 🎉',
+            html: `
+                <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #e0e0e0; border-radius: 10px;">
+                    <h1 style="color: #1DA1F2; text-align: center;">¡Bienvenido a Zync!</h1>
+                    <h2 style="color: #333;">Hola @${username},</h2>
+                    <p style="color: #555; font-size: 16px;">Nos hace muchísima ilusión tenerte por aquí. Zync es tu nuevo espacio para compartir ideas, fotos y conectar con el mundo.</p>
+                    <p style="color: #555; font-size: 16px;">¿Por qué no empiezas publicando tu primer Zync o subiendo un Zync Drop?</p>
+                    <div style="text-align: center; margin: 30px 0;">
+                        <a href="https://zync-app.net" style="background-color: #1DA1F2; color: white; padding: 12px 24px; text-decoration: none; border-radius: 25px; font-weight: bold; font-size: 16px;">Empezar a Zyncear</a>
+                    </div>
+                    <p style="color: #999; font-size: 12px; text-align: center;">Si tienes alguna duda, estamos aquí para ayudarte.</p>
+                </div>
+            `
+        }).then(() => console.log(`✉️ Correo de bienvenida enviado a @${username}`))
+          .catch(err => console.error('❌ Error enviando bienvenida:', err));
+
         res.status(201).json({ mensaje: 'OK', usuarioId: r.insertId });
     } catch (e) {
         if (e.code === 'ER_DUP_ENTRY') return res.status(409).json({ error: 'El usuario ya existe' });
@@ -168,12 +181,32 @@ app.post('/api/auth/google', async (req, res) => {
     try {
         const [u] = await db.query('SELECT * FROM usuarios WHERE email = ?', [email]);
         let usuario = u[0];
+        
+        // Si no existe, es un usuario NUEVO que se registra con Google
         if (!usuario) {
             const baseUser = email.split('@')[0].toLowerCase().replace(/[^a-z0-9_]/g, '');
             const rndPass = await bcrypt.hash(Math.random().toString(36).slice(-10), 10);
             const [r] = await db.query('INSERT INTO usuarios (username, email, password, avatar_url) VALUES (?, ?, ?, ?)', [baseUser, email, rndPass, photoUrl]);
             usuario = { id: r.insertId, username: baseUser };
+
+            // 👇 ENVIAR CORREO DE BIENVENIDA A USUARIOS DE GOOGLE 👇
+            resend.emails.send({
+                from: 'Zync App <no-reply@zync-app.net>',
+                to: email,
+                subject: '¡Bienvenido a Zync, @' + baseUser + '! 🎉',
+                html: `
+                    <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #e0e0e0; border-radius: 10px;">
+                        <h1 style="color: #1DA1F2; text-align: center;">¡Bienvenido a Zync!</h1>
+                        <h2 style="color: #333;">Hola @${baseUser},</h2>
+                        <p style="color: #555; font-size: 16px;">Has iniciado sesión con éxito usando Google. Tu aventura en Zync acaba de comenzar.</p>
+                        <div style="text-align: center; margin: 30px 0;">
+                            <a href="https://zync-app.net" style="background-color: #1DA1F2; color: white; padding: 12px 24px; text-decoration: none; border-radius: 25px; font-weight: bold; font-size: 16px;">Ir a mi Muro</a>
+                        </div>
+                    </div>
+                `
+            }).catch(e => console.log('Error correo Google:', e));
         }
+        
         const token = jwt.sign({ id: usuario.id }, 'MI_CLAVE_SECRETA_SUPER_SEGURA', { expiresIn: '7d' });
         res.json({ token, usuario });
     } catch (e) { res.status(500).json({ error: 'Error' }); }
