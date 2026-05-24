@@ -749,7 +749,7 @@ app.post('/api/usuarios/:id/bloquear', verificarToken, async (req, res) => {
             res.json({ bloqueado: false, mensaje: 'Usuario desbloqueado' });
         } else {
             // Si no estaba bloqueado, lo bloqueamos
-            await db.query('INSERT INTO bloqueos (bloador_id, bloqueado_id) VALUES (?, ?)', [miId, targetId]);
+            await db.query('INSERT INTO bloqueos (bloqueador_id, bloqueado_id) VALUES (?, ?)', [miId, targetId]);
             
             // MAGIA EXTRA: Si se seguían mutuamente, al bloquearse se deja de seguir automáticamente
             await db.query('DELETE FROM seguidores WHERE (seguidor_id = ? AND seguido_id = ?) OR (seguidor_id = ? AND seguido_id = ?)', [miId, targetId, targetId, miId]);
