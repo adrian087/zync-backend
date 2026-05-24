@@ -441,13 +441,21 @@ app.get('/api/usuarios/:id', verificarToken, async (req, res) => {
     try {
         const [u] = await db.query('SELECT id, username, bio, avatar_url FROM usuarios WHERE id = ?', [perfilId]);
         if (u.length === 0) return res.status(404).json({ error: 'No encontrado' });
+        
         const [s] = await db.query('SELECT * FROM seguidores WHERE seguidor_id = ? AND seguido_id = ?', [miId, perfilId]);
         const [seg] = await db.query('SELECT COUNT(*) as t FROM seguidores WHERE seguido_id = ?', [perfilId]);
         const [sig] = await db.query('SELECT COUNT(*) as t FROM seguidores WHERE seguidor_id = ?', [perfilId]);
+        
+        // 👇 AÑADIMOS ESTO: Comprobamos si lo tienes bloqueado 👇
+        const [bloqueo] = await db.query('SELECT id FROM bloqueos WHERE bloqueador_id = ? AND bloqueado_id = ?', [miId, perfilId]);
+        
         const [p] = await db.query(baseQueryPublicaciones + ' WHERE p.usuario_id = ? ORDER BY p.fecha_creacion DESC', [miId, miId, miId, perfilId]);
+        
         res.json({
             usuario: { ...u[0], avatar_url: arreglarUrl(u[0].avatar_url), total_seguidores: seg[0].t, total_siguiendo: sig[0].t, totalPosts: p.length },
-            le_sigo: s.length > 0, publicaciones: p.map(formatearPost)
+            le_sigo: s.length > 0, 
+            le_tengo_bloqueado: bloqueo.length > 0, // 👈 SE LO MANDAMOS A LA APP
+            publicaciones: p.map(formatearPost)
         });
     } catch (e) { res.status(500).json({ error: 'Error' }); }
 });
