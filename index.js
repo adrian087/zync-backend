@@ -9,7 +9,9 @@ const verificarToken = require('./middlewares/auth');
 const multer = require('multer');
 const path = require('path');
 
-const nodemailer = require('nodemailer');
+// CONFIGURACIÓN DE RESEND
+const { Resend } = require('resend');
+const resend = new Resend('re_J3dS5o4t_9eJ6RsPF7DHT1KjihAtHedzW');
 
 // 👇 CONFIGURACIÓN DEL CORREO 👇
 const transporter = nodemailer.createTransport({
@@ -590,37 +592,41 @@ app.post('/api/auth/forgot-password', async (req, res) => {
         const [usuarios] = await db.query('SELECT * FROM usuarios WHERE email = ?', [email]);
         if (usuarios.length === 0) return res.status(404).json({ error: 'Este correo no está registrado en Zync' });
 
-        // Generar código de 6 dígitos
         const codigo = Math.floor(100000 + Math.random() * 900000).toString();
 
         await db.query('DELETE FROM recuperacion_passwords WHERE email = ?', [email]);
         await db.query('INSERT INTO recuperacion_passwords (email, codigo, expira_en) VALUES (?, ?, DATE_ADD(NOW(), INTERVAL 5 MINUTE))', [email, codigo]);
 
-        // 👇 TRUCO SALVAVIDAS: Imprimimos el código en tu consola para que puedas testear 👇
-        console.log(`\n======================================`);
-        console.log(`🔐 CÓDIGO DE RECUPERACIÓN PARA ${email}: ${codigo}`);
-        console.log(`======================================\n`);
+        console.log(`\n🔐 INTENTANDO ENVIAR CÓDIGO [${codigo}] a ${email} POR RESEND...`);
 
-        const mailOptions = {
-            from: '"Zync App" <zyncappinfo@gmail.com>',
+        // 👇 DISPARAMOS EL CORREO POR API HTTPS (SIN BLOQUEOS) 👇
+        const { data, error } = await resend.emails.send({
+            from: 'Zync App <no-reply@zync-app.net>',
             to: email,
-            subject: 'Código de recuperación de contraseña',
-            html: `<h2>Hola @${usuarios[0].username},</h2>
-                   <p>Has solicitado restablecer tu contraseña. Tu código de verificación es:</p>
-                   <h1 style="color: #4CAF50; letter-spacing: 5px;">${codigo}</h1>
-                   <p>Este código caducará en 5 minutos.</p>`
-        };
+            subject: 'Zync - Tu código de recuperación',
+            html: `
+                <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #e0e0e0; border-radius: 10px;">
+                    <h2 style="color: #1DA1F2;">Hola @${usuarios[0].username},</h2>
+                    <p>Has solicitado restablecer tu contraseña. Tu código de verificación es:</p>
+                    <div style="background-color: #f8f9fa; padding: 15px; text-align: center; border-radius: 8px; margin: 20px 0;">
+                        <h1 style="color: #333; letter-spacing: 8px; margin: 0;">${codigo}</h1>
+                    </div>
+                    <p style="color: #666; font-size: 14px;">Este código caducará en 5 minutos. Si no has sido tú, puedes ignorar este mensaje de forma segura.</p>
+                </div>
+            `
+        });
 
-        // 👇 Le quitamos el "await" para que no congele la app si DigitalOcean bloquea la salida 👇
-        transporter.sendMail(mailOptions)
-            .then(() => console.log('✉️ Correo enviado por Gmail con éxito'))
-            .catch(err => console.log('⚠️ Aviso: DigitalOcean bloqueó el envío, pero el código está arriba.'));
+        if (error) {
+            console.error('Error de Resend:', error);
+            return res.status(500).json({ error: 'Error al enviar el correo con Resend' });
+        }
 
-        // Respondemos a Flutter INMEDIATAMENTE
-        res.json({ mensaje: 'Código generado correctamente' });
+        console.log('¡CORREO ENVIADO CON ÉXITO! ID:', data.id);
+        res.json({ mensaje: 'Código enviado correctamente' });
+        
     } catch (error) {
-        console.error('Error al generar código:', error);
-        res.status(500).json({ error: 'Error en el servidor' });
+        console.error('Error del servidor:', error);
+        res.status(500).json({ error: 'Error interno del servidor' });
     }
 });
 
