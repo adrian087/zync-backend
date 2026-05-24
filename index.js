@@ -718,3 +718,45 @@ app.post('/api/auth/reset-password', async (req, res) => {
         res.status(500).json({ error: 'Error al cambiar contraseña' });
     }
 });
+
+// ==========================================
+// RUTAS: MODERACIÓN (Reportes y Bloqueos)
+// ==========================================
+app.post('/api/reportar', verificarToken, async (req, res) => {
+    const { usuario_destino_id, publicacion_id, motivo } = req.body;
+    try {
+        await db.query(
+            'INSERT INTO reportes (usuario_origen_id, usuario_destino_id, publicacion_id, motivo) VALUES (?, ?, ?, ?)',
+            [req.usuario.id, usuario_destino_id || null, publicacion_id || null, motivo]
+        );
+        res.json({ mensaje: 'Reporte enviado con éxito. Nuestro equipo lo revisará.' });
+    } catch (e) {
+        res.status(500).json({ error: 'Error al enviar el reporte' });
+    }
+});
+
+app.post('/api/usuarios/:id/bloquear', verificarToken, async (req, res) => {
+    const miId = req.usuario.id;
+    const targetId = req.params.id;
+    if (miId == targetId) return res.status(400).json({ error: 'No puedes bloquearte a ti mismo' });
+
+    try {
+        const [existe] = await db.query('SELECT id FROM bloqueos WHERE bloqueador_id = ? AND bloqueado_id = ?', [miId, targetId]);
+        
+        if (existe.length > 0) {
+            // Si ya lo tenía bloqueado, lo desbloqueamos
+            await db.query('DELETE FROM bloqueos WHERE id = ?', [existe[0].id]);
+            res.json({ bloqueado: false, mensaje: 'Usuario desbloqueado' });
+        } else {
+            // Si no estaba bloqueado, lo bloqueamos
+            await db.query('INSERT INTO bloqueos (bloador_id, bloqueado_id) VALUES (?, ?)', [miId, targetId]);
+            
+            // MAGIA EXTRA: Si se seguían mutuamente, al bloquearse se deja de seguir automáticamente
+            await db.query('DELETE FROM seguidores WHERE (seguidor_id = ? AND seguido_id = ?) OR (seguidor_id = ? AND seguido_id = ?)', [miId, targetId, targetId, miId]);
+            
+            res.json({ bloqueado: true, mensaje: 'Usuario bloqueado' });
+        }
+    } catch (e) {
+        res.status(500).json({ error: 'Error interno' });
+    }
+});
