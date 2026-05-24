@@ -1,3 +1,4 @@
+require('dotenv').config(); // 👈 MAGIA: Carga las variables del archivo .env
 const express = require('express');
 const http = require('http');
 const { Server } = require('socket.io');
@@ -9,9 +10,9 @@ const verificarToken = require('./middlewares/auth');
 const multer = require('multer');
 const path = require('path');
 
-// CONFIGURACIÓN DE RESEND
+// CONFIGURACIÓN DE RESEND (Ahora usando variables de entorno 🔒)
 const { Resend } = require('resend');
-const resend = new Resend('re_J3dS5o4t_9eJ6RsPF7DHT1KjihAtHedzW');
+const resend = new Resend(process.env.RESEND_API_KEY);
 
 // ==========================================
 // 1. INICIALIZAMOS FIREBASE ADMIN SDK ☁️
@@ -31,7 +32,7 @@ try {
 const app = express();
 const server = http.createServer(app);
 const io = new Server(server, { cors: { origin: '*' } });
-const PORT = 3000;
+const PORT = process.env.PORT || 3000;
 
 app.use(cors());
 app.use(express.json());
@@ -180,7 +181,8 @@ app.post('/api/login', async (req, res) => {
         const passOk = await bcrypt.compare(password, u[0].password);
         if (!passOk) return res.status(401).json({ error: 'Credenciales incorrectas' });
         
-        const token = jwt.sign({ id: u[0].id }, 'MI_CLAVE_SECRETA_SUPER_SEGURA', { expiresIn: '7d' });
+        // Usamos la variable de entorno para el JWT
+        const token = jwt.sign({ id: u[0].id }, process.env.JWT_SECRET, { expiresIn: '7d' });
         res.json({ token, usuario: { id: u[0].id, username: u[0].username } });
     } catch (e) { 
         res.status(500).json({ error: 'Error interno del servidor' }); 
@@ -218,7 +220,8 @@ app.post('/api/auth/google', async (req, res) => {
             }).catch(e => console.log('Error correo Google:', e));
         }
         
-        const token = jwt.sign({ id: usuario.id }, 'MI_CLAVE_SECRETA_SUPER_SEGURA', { expiresIn: '7d' });
+        // Usamos la variable de entorno para el JWT
+        const token = jwt.sign({ id: usuario.id }, process.env.JWT_SECRET, { expiresIn: '7d' });
         res.json({ token, usuario });
     } catch (e) { res.status(500).json({ error: 'Error' }); }
 });
