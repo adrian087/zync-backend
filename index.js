@@ -165,15 +165,26 @@ app.post('/api/registro', async (req, res) => {
 });
 
 app.post('/api/login', async (req, res) => {
-    const { email, password } = req.body;
+    const identificador = req.body.email; 
+    const password = req.body.password;
+
     try {
-        const [u] = await db.query('SELECT * FROM usuarios WHERE email = ?', [email]);
+        // 👇 MAGIA SQL: Buscamos si coincide con el email OR con el username 👇
+        const [u] = await db.query(
+            'SELECT * FROM usuarios WHERE email = ? OR username = ?', 
+            [identificador, identificador]
+        );
+
         if (u.length === 0) return res.status(401).json({ error: 'Credenciales incorrectas' });
+        
         const passOk = await bcrypt.compare(password, u[0].password);
         if (!passOk) return res.status(401).json({ error: 'Credenciales incorrectas' });
+        
         const token = jwt.sign({ id: u[0].id }, 'MI_CLAVE_SECRETA_SUPER_SEGURA', { expiresIn: '7d' });
         res.json({ token, usuario: { id: u[0].id, username: u[0].username } });
-    } catch (e) { res.status(500).json({ error: 'Error' }); }
+    } catch (e) { 
+        res.status(500).json({ error: 'Error interno del servidor' }); 
+    }
 });
 
 app.post('/api/auth/google', async (req, res) => {
