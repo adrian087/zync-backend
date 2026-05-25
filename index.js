@@ -97,7 +97,7 @@ async function dispararPush(destinoId, origenId, tipo) {
 const arreglarUrl = (url) => {
     if (!url) return null;
     if (url.startsWith('http')) return url; 
-    return `https://zync-app.net${url}`; 
+    return `https://api.zync-app.net${url}`;
 };
 
 const formatearPost = (post) => ({
