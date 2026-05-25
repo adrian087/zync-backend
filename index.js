@@ -36,8 +36,13 @@ const PORT = process.env.PORT || 3000;
 
 app.use(cors());
 app.use(express.json());
+// Busca esta parte en tu index.js y cámbiala por esto:
 app.use('/uploads', express.static('uploads', {
     setHeaders: (res, path, stat) => {
+        // 👇 Esto obliga al navegador a NO cachear la imagen si no es necesario
+        res.set('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+        res.set('Pragma', 'no-cache');
+        res.set('Expires', '0');
         res.set('Access-Control-Allow-Origin', '*');
         res.set('Cross-Origin-Resource-Policy', 'cross-origin');
     }
