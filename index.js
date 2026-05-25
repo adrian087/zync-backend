@@ -36,8 +36,12 @@ const PORT = process.env.PORT || 3000;
 
 app.use(cors());
 app.use(express.json());
-app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
-
+app.use('/uploads', express.static('uploads', {
+    setHeaders: (res, path, stat) => {
+        res.set('Access-Control-Allow-Origin', '*');
+        res.set('Cross-Origin-Resource-Policy', 'cross-origin');
+    }
+}));
 const storage = multer.diskStorage({
     destination: function (req, file, cb) { cb(null, 'uploads/'); },
     filename: function (req, file, cb) { cb(null, Date.now() + path.extname(file.originalname)); }
