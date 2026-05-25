@@ -36,7 +36,8 @@ const PORT = process.env.PORT || 3000;
 
 app.use(cors());
 app.use(express.json());
-// Busca esta parte en tu index.js y cámbiala por esto:
+
+// CONFIGURACIÓN ESTÁTICOS Y CACHÉ
 app.use('/uploads', express.static('uploads', {
     setHeaders: (res, path, stat) => {
         // 👇 Esto obliga al navegador a NO cachear la imagen si no es necesario
@@ -47,6 +48,7 @@ app.use('/uploads', express.static('uploads', {
         res.set('Cross-Origin-Resource-Policy', 'cross-origin');
     }
 }));
+
 const storage = multer.diskStorage({
     destination: function (req, file, cb) { cb(null, 'uploads/'); },
     filename: function (req, file, cb) { cb(null, Date.now() + path.extname(file.originalname)); }
@@ -133,7 +135,7 @@ const baseQueryPublicaciones = `
 `;
 
 app.get('/', (req, res) => res.json({ mensaje: 'Servidor funcionando 🚀' }));
-server.listen(PORT, () => console.log(`✅ Servidor en http://209.38.196.225:${PORT}`));
+server.listen(PORT, () => console.log(`✅ Servidor en puerto ${PORT}`));
 
 // ==========================================
 // RUTA: REGISTRO Y LOGIN (Auth)
@@ -147,7 +149,7 @@ app.post('/api/registro', async (req, res) => {
         const hashed = await bcrypt.hash(password, salt);
         const [r] = await db.query('INSERT INTO usuarios (nombres, apellidos, username, email, password) VALUES (?, ?, ?, ?, ?)', [nombres, apellidos, username, email, hashed]);
         
-        // 👇 MAGIA: ENVIAR CORREO DE BIENVENIDA (Sin await para que la app no tenga que esperar) 👇
+        // 👇 MAGIA: ENVIAR CORREO DE BIENVENIDA 👇
         resend.emails.send({
             from: 'Zync App <no-reply@zync-app.net>',
             to: email,
@@ -170,7 +172,8 @@ app.post('/api/registro', async (req, res) => {
         res.status(201).json({ mensaje: 'OK', usuarioId: r.insertId });
     } catch (e) {
         if (e.code === 'ER_DUP_ENTRY') return res.status(409).json({ error: 'El usuario ya existe' });
-        res.status(500).json({ error: 'Error' });
+        console.error('🔥 Error en registro:', e);
+        res.status(500).json({ error: 'Error interno del servidor' });
     }
 });
 
@@ -179,7 +182,6 @@ app.post('/api/login', async (req, res) => {
     const password = req.body.password;
 
     try {
-        // 👇 MAGIA SQL: Buscamos si coincide con el email OR con el username 👇
         const [u] = await db.query(
             'SELECT * FROM usuarios WHERE email = ? OR username = ?', 
             [identificador, identificador]
@@ -190,10 +192,10 @@ app.post('/api/login', async (req, res) => {
         const passOk = await bcrypt.compare(password, u[0].password);
         if (!passOk) return res.status(401).json({ error: 'Credenciales incorrectas' });
         
-        // Usamos la variable de entorno para el JWT
         const token = jwt.sign({ id: u[0].id }, process.env.JWT_SECRET, { expiresIn: '7d' });
         res.json({ token, usuario: { id: u[0].id, username: u[0].username } });
     } catch (e) { 
+        console.error('🔥 Error en login:', e);
         res.status(500).json({ error: 'Error interno del servidor' }); 
     }
 });
@@ -204,14 +206,12 @@ app.post('/api/auth/google', async (req, res) => {
         const [u] = await db.query('SELECT * FROM usuarios WHERE email = ?', [email]);
         let usuario = u[0];
         
-        // Si no existe, es un usuario NUEVO que se registra con Google
         if (!usuario) {
             const baseUser = email.split('@')[0].toLowerCase().replace(/[^a-z0-9_]/g, '');
             const rndPass = await bcrypt.hash(Math.random().toString(36).slice(-10), 10);
             const [r] = await db.query('INSERT INTO usuarios (username, email, password, avatar_url) VALUES (?, ?, ?, ?)', [baseUser, email, rndPass, photoUrl]);
             usuario = { id: r.insertId, username: baseUser };
 
-            // 👇 ENVIAR CORREO DE BIENVENIDA A USUARIOS DE GOOGLE 👇
             resend.emails.send({
                 from: 'Zync App <no-reply@zync-app.net>',
                 to: email,
@@ -229,10 +229,12 @@ app.post('/api/auth/google', async (req, res) => {
             }).catch(e => console.log('Error correo Google:', e));
         }
         
-        // Usamos la variable de entorno para el JWT
         const token = jwt.sign({ id: usuario.id }, process.env.JWT_SECRET, { expiresIn: '7d' });
         res.json({ token, usuario });
-    } catch (e) { res.status(500).json({ error: 'Error' }); }
+    } catch (e) { 
+        console.error('🔥 Error en auth google:', e);
+        res.status(500).json({ error: 'Error interno del servidor' }); 
+    }
 });
 
 // ==========================================
@@ -246,7 +248,10 @@ app.post('/api/publicaciones', verificarToken, upload.array('imagenes', 4), asyn
             await Promise.all(req.files.map(f => db.query('INSERT INTO publicaciones_imagenes (publicacion_id, imagen_url) VALUES (?, ?)', [r.insertId, `/uploads/${f.filename}`])));
         }
         res.status(201).json({ mensaje: 'OK' });
-    } catch (e) { res.status(500).json({ error: 'Error' }); }
+    } catch (e) { 
+        console.error('🔥 Error subiendo publicacion:', e);
+        res.status(500).json({ error: 'Error interno del servidor' }); 
+    }
 });
 
 app.get('/api/publicaciones', verificarToken, async (req, res) => {
@@ -261,9 +266,13 @@ app.get('/api/publicaciones', verificarToken, async (req, res) => {
             ORDER BY p.fecha_creacion DESC LIMIT ? OFFSET ?`;
         const [p] = await db.query(query, [miId, miId, miId, miId, miId, miId, miId, limit, offset]);
         res.json(p.map(formatearPost));
-    } catch (e) { res.status(500).json({ error: 'Error' }); }
+    } catch (e) { 
+        console.error('🔥 Error obteniendo muro:', e);
+        res.status(500).json({ error: 'Error interno del servidor' }); 
+    }
 });
 
+// RUTAS "SIGUIENDO" CORRECTA Y ÚNICA (Anti-bloqueos)
 app.get('/api/publicaciones/siguiendo', verificarToken, async (req, res) => {
     const limit = 10; const offset = ((parseInt(req.query.page) || 1) - 1) * limit;
     const miId = req.usuario.id;
@@ -276,17 +285,10 @@ app.get('/api/publicaciones/siguiendo', verificarToken, async (req, res) => {
             ORDER BY p.fecha_creacion DESC LIMIT ? OFFSET ?`;
         const [p] = await db.query(query, [miId, miId, miId, miId, miId, miId, limit, offset]);
         res.json(p.map(formatearPost));
-    } catch (e) { res.status(500).json({ error: 'Error' }); }
-});
-
-app.get('/api/publicaciones/siguiendo', verificarToken, async (req, res) => {
-    const limit = 10; const offset = ((parseInt(req.query.page) || 1) - 1) * limit;
-    const miId = req.usuario.id;
-    try {
-        const query = baseQueryPublicaciones + ` JOIN seguidores s ON p.usuario_id = s.seguido_id WHERE s.seguidor_id = ? ORDER BY p.fecha_creacion DESC LIMIT ? OFFSET ?`;
-        const [p] = await db.query(query, [miId, miId, miId, miId, limit, offset]);
-        res.json(p.map(formatearPost));
-    } catch (e) { res.status(500).json({ error: 'Error' }); }
+    } catch (e) { 
+        console.error('🔥 Error obteniendo feed siguiendo:', e);
+        res.status(500).json({ error: 'Error interno del servidor' }); 
+    }
 });
 
 app.delete('/api/publicaciones/:id', verificarToken, async (req, res) => {
@@ -294,7 +296,10 @@ app.delete('/api/publicaciones/:id', verificarToken, async (req, res) => {
         const [r] = await db.query('DELETE FROM publicaciones WHERE id = ? AND usuario_id = ?', [req.params.id, req.usuario.id]);
         if (r.affectedRows === 0) return res.status(403).json({ error: 'No autorizado' });
         res.json({ mensaje: 'Eliminada' });
-    } catch (e) { res.status(500).json({ error: 'Error' }); }
+    } catch (e) { 
+        console.error('🔥 Error borrando post:', e);
+        res.status(500).json({ error: 'Error interno del servidor' }); 
+    }
 });
 
 app.put('/api/publicaciones/:id', verificarToken, async (req, res) => {
@@ -303,7 +308,10 @@ app.put('/api/publicaciones/:id', verificarToken, async (req, res) => {
         const [r] = await db.query('UPDATE publicaciones SET contenido = ? WHERE id = ? AND usuario_id = ?', [req.body.contenido, req.params.id, req.usuario.id]);
         if (r.affectedRows === 0) return res.status(403).json({ error: 'No autorizado' });
         res.json({ mensaje: 'Actualizada' });
-    } catch (e) { res.status(500).json({ error: 'Error' }); }
+    } catch (e) { 
+        console.error('🔥 Error actualizando post:', e);
+        res.status(500).json({ error: 'Error interno del servidor' }); 
+    }
 });
 
 // ==========================================
@@ -336,7 +344,10 @@ app.post('/api/publicaciones/:id/rezync', verificarToken, async (req, res) => {
         const [c] = await db.query('SELECT COUNT(*) as total FROM publicaciones WHERE publicacion_original_id = ?', [originalId]);
         io.emit('actualizacion_rezync', { publicacionId: parseInt(originalId), total_rezyncs: c[0].total });
         res.json({ rezynceado });
-    } catch (e) { res.status(500).json({ error: 'Error' }); }
+    } catch (e) { 
+        console.error('🔥 Error en rezync:', e);
+        res.status(500).json({ error: 'Error interno del servidor' }); 
+    }
 });
 
 app.post('/api/publicaciones/:id/like', verificarToken, async (req, res) => {
@@ -366,7 +377,10 @@ app.post('/api/publicaciones/:id/like', verificarToken, async (req, res) => {
         const [c] = await db.query('SELECT COUNT(*) as total FROM likes WHERE publicacion_id = ?', [targetId]);
         io.emit('actualizacion_like', { publicacionId: parseInt(targetId), total_likes: c[0].total });
         return res.json({ liked });
-    } catch (e) { res.status(500).json({ error: 'Error' }); }
+    } catch (e) { 
+        console.error('🔥 Error en like:', e);
+        res.status(500).json({ error: 'Error interno del servidor' }); 
+    }
 });
 
 app.post('/api/publicaciones/:id/comentarios', verificarToken, async (req, res) => {
@@ -385,7 +399,10 @@ app.post('/api/publicaciones/:id/comentarios', verificarToken, async (req, res) 
             dispararPush(propietarioId, miId, 'comentario');
         }
         res.status(201).json({ mensaje: 'Comentado' });
-    } catch (e) { res.status(500).json({ error: 'Error' }); }
+    } catch (e) { 
+        console.error('🔥 Error comentando:', e);
+        res.status(500).json({ error: 'Error interno del servidor' }); 
+    }
 });
 
 app.get('/api/publicaciones/:id/comentarios', verificarToken, async (req, res) => {
@@ -394,7 +411,10 @@ app.get('/api/publicaciones/:id/comentarios', verificarToken, async (req, res) =
         const targetId = pub[0]?.publicacion_original_id || req.params.id;
         const [c] = await db.query(`SELECT c.id, c.usuario_id, c.contenido, c.fecha_creacion, c.comentario_padre_id, u.username, u.avatar_url FROM comentarios c JOIN usuarios u ON c.usuario_id = u.id WHERE c.publicacion_id = ? ORDER BY c.fecha_creacion ASC`, [targetId]);
         res.json(c.map(formatearPost));
-    } catch (e) { res.status(500).json({ error: 'Error' }); }
+    } catch (e) { 
+        console.error('🔥 Error obteniendo comentarios:', e);
+        res.status(500).json({ error: 'Error interno del servidor' }); 
+    }
 });
 
 // ==========================================
@@ -411,7 +431,10 @@ app.post('/api/publicaciones/:id/guardar', verificarToken, async (req, res) => {
         if (existe.length > 0) { await db.query('DELETE FROM guardados WHERE id = ?', [existe[0].id]); } 
         else { await db.query('INSERT INTO guardados (usuario_id, publicacion_id) VALUES (?, ?)', [miId, targetId]); guardado = true; }
         res.json({ guardado });
-    } catch (e) { res.status(500).json({ error: 'Error' }); }
+    } catch (e) { 
+        console.error('🔥 Error en guardar post:', e);
+        res.status(500).json({ error: 'Error interno del servidor' }); 
+    }
 });
 
 app.get('/api/publicaciones/guardadas', verificarToken, async (req, res) => {
@@ -420,27 +443,53 @@ app.get('/api/publicaciones/guardadas', verificarToken, async (req, res) => {
         const q = baseQueryPublicaciones + ` JOIN guardados g ON (p.id = g.publicacion_id OR p.publicacion_original_id = g.publicacion_id) WHERE g.usuario_id = ? ORDER BY g.fecha_guardado DESC`;
         const [p] = await db.query(q, [miId, miId, miId, miId]);
         res.json(p.map(formatearPost));
-    } catch (e) { res.status(500).json({ error: 'Error' }); }
+    } catch (e) { 
+        console.error('🔥 Error obteniendo guardados:', e);
+        res.status(500).json({ error: 'Error interno del servidor' }); 
+    }
 });
 
+// BUSCADOR DE PUBLICACIONES (Anti-bloqueos)
 app.get('/api/publicaciones/buscar', verificarToken, async (req, res) => {
     if (!req.query.q) return res.json([]);
     const miId = req.usuario.id;
-    const q = baseQueryPublicaciones + ` 
-        WHERE (p.contenido LIKE ? OR po.contenido LIKE ?)
-        AND p.usuario_id NOT IN (SELECT bloqueado_id FROM bloqueos WHERE bloqueador_id = ?)
-        AND p.usuario_id NOT IN (SELECT bloqueador_id FROM bloqueos WHERE bloqueado_id = ?)
-        ORDER BY p.fecha_creacion DESC LIMIT 20`;
-    const [p] = await db.query(q, [miId, miId, miId, `%${req.query.q}%`, `%${req.query.q}%`, miId, miId]);
-    res.json(p.map(formatearPost));
+    try {
+        const q = baseQueryPublicaciones + ` 
+            WHERE (p.contenido LIKE ? OR po.contenido LIKE ?)
+            AND p.usuario_id NOT IN (SELECT bloqueado_id FROM bloqueos WHERE bloqueador_id = ?)
+            AND p.usuario_id NOT IN (SELECT bloqueador_id FROM bloqueos WHERE bloqueado_id = ?)
+            ORDER BY p.fecha_creacion DESC LIMIT 20`;
+        const [p] = await db.query(q, [miId, miId, miId, `%${req.query.q}%`, `%${req.query.q}%`, miId, miId]);
+        res.json(p.map(formatearPost));
+    } catch (e) {
+        console.error('🔥 Error buscando publicaciones:', e);
+        res.status(500).json({ error: 'Error interno del servidor' });
+    }
 });
 
-app.get('/api/publicaciones/buscar', verificarToken, async (req, res) => {
+// NUEVO: BUSCADOR DE USUARIOS (Anti-bloqueos)
+app.get('/api/usuarios/buscar', verificarToken, async (req, res) => {
     if (!req.query.q) return res.json([]);
     const miId = req.usuario.id;
-    const q = baseQueryPublicaciones + ' WHERE p.contenido LIKE ? OR po.contenido LIKE ? ORDER BY p.fecha_creacion DESC LIMIT 20';
-    const [p] = await db.query(q, [miId, miId, miId, `%${req.query.q}%`, `%${req.query.q}%`]);
-    res.json(p.map(formatearPost));
+    try {
+        const q = `
+            SELECT id, username, avatar_url, nombres, apellidos 
+            FROM usuarios 
+            WHERE (username LIKE ? OR nombres LIKE ? OR apellidos LIKE ?)
+            AND id NOT IN (SELECT bloqueado_id FROM bloqueos WHERE bloqueador_id = ?)
+            AND id NOT IN (SELECT bloqueador_id FROM bloqueos WHERE bloqueado_id = ?)
+            LIMIT 20
+        `;
+        const [usuarios] = await db.query(q, [
+            `%${req.query.q}%`, `%${req.query.q}%`, `%${req.query.q}%`, 
+            miId, miId
+        ]);
+        
+        res.json(usuarios.map(u => ({ ...u, avatar_url: arreglarUrl(u.avatar_url) })));
+    } catch (e) {
+        console.error('🔥 Error buscando usuarios:', e);
+        res.status(500).json({ error: 'Error interno del servidor' });
+    }
 });
 
 // ==========================================
@@ -448,9 +497,14 @@ app.get('/api/publicaciones/buscar', verificarToken, async (req, res) => {
 // ==========================================
 app.get('/api/perfil', verificarToken, async (req, res) => {
     const miId = req.usuario.id;
-    const [u] = await db.query('SELECT username, bio, avatar_url FROM usuarios WHERE id = ?', [miId]);
-    const [p] = await db.query(baseQueryPublicaciones + ' WHERE p.usuario_id = ? ORDER BY p.fecha_creacion DESC', [miId, miId, miId, miId]);
-    res.json({ username: u[0].username, bio: u[0].bio, avatar_url: arreglarUrl(u[0].avatar_url), totalPosts: p.length, publicaciones: p.map(formatearPost) });
+    try {
+        const [u] = await db.query('SELECT username, bio, avatar_url FROM usuarios WHERE id = ?', [miId]);
+        const [p] = await db.query(baseQueryPublicaciones + ' WHERE p.usuario_id = ? ORDER BY p.fecha_creacion DESC', [miId, miId, miId, miId]);
+        res.json({ username: u[0].username, bio: u[0].bio, avatar_url: arreglarUrl(u[0].avatar_url), totalPosts: p.length, publicaciones: p.map(formatearPost) });
+    } catch(e) {
+        console.error('🔥 Error cargando mi perfil:', e);
+        res.status(500).json({ error: 'Error interno del servidor' });
+    }
 });
 
 app.put('/api/perfil/editar', verificarToken, upload.single('avatar'), async (req, res) => {
@@ -467,7 +521,10 @@ app.put('/api/perfil/editar', verificarToken, upload.single('avatar'), async (re
         q = q.slice(0, -2) + ' WHERE id = ?'; vals.push(miId);
         await db.query(q, vals);
         res.json({ mensaje: 'OK' });
-    } catch (e) { res.status(500).json({ error: 'Error' }); }
+    } catch (e) { 
+        console.error('🔥 Error editando perfil:', e);
+        res.status(500).json({ error: 'Error interno del servidor' }); 
+    }
 });
 
 app.get('/api/usuarios/bloqueados', verificarToken, async (req, res) => {
@@ -482,6 +539,7 @@ app.get('/api/usuarios/bloqueados', verificarToken, async (req, res) => {
         );
         res.json(b.map(u => ({ ...u, avatar_url: arreglarUrl(u.avatar_url) })));
     } catch (e) {
+        console.error('🔥 Error obteniendo bloqueados:', e);
         res.status(500).json({ error: 'Error al obtener la lista de bloqueados' });
     }
 });
@@ -496,7 +554,6 @@ app.get('/api/usuarios/:id', verificarToken, async (req, res) => {
         const [seg] = await db.query('SELECT COUNT(*) as t FROM seguidores WHERE seguido_id = ?', [perfilId]);
         const [sig] = await db.query('SELECT COUNT(*) as t FROM seguidores WHERE seguidor_id = ?', [perfilId]);
         
-        // 👇 AÑADIMOS ESTO: Comprobamos si lo tienes bloqueado 👇
         const [bloqueo] = await db.query('SELECT id FROM bloqueos WHERE bloqueador_id = ? AND bloqueado_id = ?', [miId, perfilId]);
         
         const [p] = await db.query(baseQueryPublicaciones + ' WHERE p.usuario_id = ? ORDER BY p.fecha_creacion DESC', [miId, miId, miId, perfilId]);
@@ -504,10 +561,13 @@ app.get('/api/usuarios/:id', verificarToken, async (req, res) => {
         res.json({
             usuario: { ...u[0], avatar_url: arreglarUrl(u[0].avatar_url), total_seguidores: seg[0].t, total_siguiendo: sig[0].t, totalPosts: p.length },
             le_sigo: s.length > 0, 
-            le_tengo_bloqueado: bloqueo.length > 0, // 👈 SE LO MANDAMOS A LA APP
+            le_tengo_bloqueado: bloqueo.length > 0, 
             publicaciones: p.map(formatearPost)
         });
-    } catch (e) { res.status(500).json({ error: 'Error' }); }
+    } catch (e) { 
+        console.error('🔥 Error cargando perfil ajeno:', e);
+        res.status(500).json({ error: 'Error interno del servidor' }); 
+    }
 });
 
 app.post('/api/usuarios/:id/seguir', verificarToken, async (req, res) => {
@@ -524,7 +584,10 @@ app.post('/api/usuarios/:id/seguir', verificarToken, async (req, res) => {
             dispararPush(targetId, miId, 'seguir');
             res.json({ siguiendo: true });
         }
-    } catch (e) { res.status(500).json({ error: 'Error' }); }
+    } catch (e) { 
+        console.error('🔥 Error siguiendo usuario:', e);
+        res.status(500).json({ error: 'Error interno del servidor' }); 
+    }
 });
 
 // ==========================================
@@ -532,12 +595,17 @@ app.post('/api/usuarios/:id/seguir', verificarToken, async (req, res) => {
 // ==========================================
 app.get('/api/mensajes/chats', verificarToken, async (req, res) => {
     const miId = req.usuario.id;
-    const q = `SELECT u.id as otro_usuario_id, u.username, u.avatar_url, m.contenido as ultimo_mensaje, m.fecha_envio, m.leido, m.remitente_id 
-               FROM usuarios u JOIN mensajes m ON (u.id = m.remitente_id OR u.id = m.destinatario_id) 
-               WHERE (m.remitente_id = ? OR m.destinatario_id = ?) AND u.id != ? AND m.id = (SELECT MAX(id) FROM mensajes m2 WHERE (m2.remitente_id = ? AND m2.destinatario_id = u.id) OR (m2.remitente_id = u.id AND m2.destinatario_id = ?)) 
-               ORDER BY m.fecha_envio DESC`;
-    const [c] = await db.query(q, [miId, miId, miId, miId, miId]);
-    res.json(c.map(chat => ({ ...chat, avatar_url: arreglarUrl(chat.avatar_url) })));
+    try {
+        const q = `SELECT u.id as otro_usuario_id, u.username, u.avatar_url, m.contenido as ultimo_mensaje, m.fecha_envio, m.leido, m.remitente_id 
+                   FROM usuarios u JOIN mensajes m ON (u.id = m.remitente_id OR u.id = m.destinatario_id) 
+                   WHERE (m.remitente_id = ? OR m.destinatario_id = ?) AND u.id != ? AND m.id = (SELECT MAX(id) FROM mensajes m2 WHERE (m2.remitente_id = ? AND m2.destinatario_id = u.id) OR (m2.remitente_id = u.id AND m2.destinatario_id = ?)) 
+                   ORDER BY m.fecha_envio DESC`;
+        const [c] = await db.query(q, [miId, miId, miId, miId, miId]);
+        res.json(c.map(chat => ({ ...chat, avatar_url: arreglarUrl(chat.avatar_url) })));
+    } catch(e) {
+        console.error('🔥 Error cargando chats:', e);
+        res.status(500).json({ error: 'Error interno del servidor' });
+    }
 });
 
 app.get('/api/mensajes/:otroUsuarioId', verificarToken, async (req, res) => {
@@ -546,7 +614,10 @@ app.get('/api/mensajes/:otroUsuarioId', verificarToken, async (req, res) => {
         await db.query('UPDATE mensajes SET leido = 1 WHERE remitente_id = ? AND destinatario_id = ?', [otroId, miId]);
         const [m] = await db.query(`SELECT m.*, u.username as remitente_username FROM mensajes m JOIN usuarios u ON m.remitente_id = u.id WHERE (m.remitente_id = ? AND m.destinatario_id = ?) OR (m.remitente_id = ? AND m.destinatario_id = ?) ORDER BY m.fecha_envio ASC`, [miId, otroId, otroId, miId]);
         res.json(m);
-    } catch (e) { res.status(500).json({ error: 'Error' }); }
+    } catch (e) { 
+        console.error('🔥 Error cargando mensajes:', e);
+        res.status(500).json({ error: 'Error interno del servidor' }); 
+    }
 });
 
 app.post('/api/mensajes/:otroUsuarioId', verificarToken, async (req, res) => {
@@ -558,7 +629,10 @@ app.post('/api/mensajes/:otroUsuarioId', verificarToken, async (req, res) => {
         io.emit('nuevo_mensaje', m[0]);
         dispararPush(otroId, miId, 'mensaje');
         res.status(201).json(m[0]);
-    } catch (e) { res.status(500).json({ error: 'Error' }); }
+    } catch (e) { 
+        console.error('🔥 Error enviando mensaje:', e);
+        res.status(500).json({ error: 'Error interno del servidor' }); 
+    }
 });
 
 // ==========================================
@@ -568,7 +642,10 @@ app.put('/api/usuarios/fcm-token', verificarToken, async (req, res) => {
     try {
         await db.query('UPDATE usuarios SET fcm_token = ? WHERE id = ?', [req.body.fcm_token, req.usuario.id]);
         res.json({ mensaje: 'OK' });
-    } catch (e) { res.status(500).json({ error: 'Error' }); }
+    } catch (e) { 
+        console.error('🔥 Error guardando fcm_token:', e);
+        res.status(500).json({ error: 'Error interno del servidor' }); 
+    }
 });
 
 app.get('/api/badges', verificarToken, async (req, res) => {
@@ -577,19 +654,32 @@ app.get('/api/badges', verificarToken, async (req, res) => {
         const [n] = await db.query('SELECT COUNT(*) as t FROM notificaciones WHERE usuario_destino_id = ? AND leida = 0', [miId]);
         const [m] = await db.query('SELECT COUNT(*) as t FROM mensajes WHERE destinatario_id = ? AND leido = 0', [miId]);
         res.json({ notificaciones: n[0].t, mensajes: m[0].t });
-    } catch (e) { res.status(500).json({ error: 'Error' }); }
+    } catch (e) { 
+        console.error('🔥 Error obteniendo badges:', e);
+        res.status(500).json({ error: 'Error interno del servidor' }); 
+    }
 });
 
 app.get('/api/notificaciones', verificarToken, async (req, res) => {
     const miId = req.usuario.id; const limit = 20; const offset = ((parseInt(req.query.page) || 1) - 1) * limit;
-    const q = `SELECT n.*, u.username as origen_username, u.avatar_url as origen_avatar, p.contenido as publicacion_contenido FROM notificaciones n JOIN usuarios u ON n.usuario_origen_id = u.id LEFT JOIN publicaciones p ON n.publicacion_id = p.id WHERE n.usuario_destino_id = ? ORDER BY n.fecha_creacion DESC LIMIT ? OFFSET ?`;
-    const [n] = await db.query(q, [miId, limit, offset]);
-    res.json(n.map(noti => ({ ...noti, origen_avatar: arreglarUrl(noti.origen_avatar) })));
+    try {
+        const q = `SELECT n.*, u.username as origen_username, u.avatar_url as origen_avatar, p.contenido as publicacion_contenido FROM notificaciones n JOIN usuarios u ON n.usuario_origen_id = u.id LEFT JOIN publicaciones p ON n.publicacion_id = p.id WHERE n.usuario_destino_id = ? ORDER BY n.fecha_creacion DESC LIMIT ? OFFSET ?`;
+        const [n] = await db.query(q, [miId, limit, offset]);
+        res.json(n.map(noti => ({ ...noti, origen_avatar: arreglarUrl(noti.origen_avatar) })));
+    } catch(e) {
+        console.error('🔥 Error obteniendo notificaciones:', e);
+        res.status(500).json({ error: 'Error interno del servidor' }); 
+    }
 });
 
 app.put('/api/notificaciones/leidas', verificarToken, async (req, res) => {
-    await db.query('UPDATE notificaciones SET leida = 1 WHERE usuario_destino_id = ? AND leida = 0', [req.usuario.id]);
-    res.json({ success: true });
+    try {
+        await db.query('UPDATE notificaciones SET leida = 1 WHERE usuario_destino_id = ? AND leida = 0', [req.usuario.id]);
+        res.json({ success: true });
+    } catch(e) {
+        console.error('🔥 Error marcando notificaciones leídas:', e);
+        res.status(500).json({ error: 'Error interno del servidor' }); 
+    }
 });
 
 // ==========================================
@@ -601,21 +691,29 @@ app.post('/api/stories', verificarToken, upload.single('media'), async (req, res
         const m = tipo === 'drop' ? (max_visualizaciones || 10) : null;
         const [r] = await db.query('INSERT INTO stories (usuario_id, media_url, tipo, max_visualizaciones) VALUES (?, ?, ?, ?)', [req.usuario.id, `/uploads/${req.file.filename}`, tipo || 'normal', m]);
         res.status(201).json({ storyId: r.insertId });
-    } catch (e) { res.status(500).json({ error: 'Error' }); }
+    } catch (e) { 
+        console.error('🔥 Error subiendo story:', e);
+        res.status(500).json({ error: 'Error interno del servidor' }); 
+    }
 });
 
 app.get('/api/stories', verificarToken, async (req, res) => {
     const miId = req.usuario.id;
-    const q = `SELECT s.*, u.username, u.avatar_url, (SELECT COUNT(*) FROM visualizaciones_stories WHERE story_id = s.id AND usuario_id = ?) as la_he_visto 
-               FROM stories s 
-               JOIN usuarios u ON s.usuario_id = u.id 
-               WHERE s.activa = 1 AND s.fecha_creacion >= NOW() - INTERVAL 1 DAY 
-               AND (s.usuario_id = ? OR s.usuario_id IN (SELECT seguido_id FROM seguidores WHERE seguidor_id = ?))
-               AND s.usuario_id NOT IN (SELECT bloqueado_id FROM bloqueos WHERE bloqueador_id = ?)
-               AND s.usuario_id NOT IN (SELECT bloqueador_id FROM bloqueos WHERE bloqueado_id = ?)
-               ORDER BY s.fecha_creacion ASC`;
-    const [s] = await db.query(q, [miId, miId, miId, miId, miId]);
-    res.json(s.map(st => ({ ...st, media_url: arreglarUrl(st.media_url), avatar_url: arreglarUrl(st.avatar_url), la_he_visto: st.la_he_visto > 0 })));
+    try {
+        const q = `SELECT s.*, u.username, u.avatar_url, (SELECT COUNT(*) FROM visualizaciones_stories WHERE story_id = s.id AND usuario_id = ?) as la_he_visto 
+                   FROM stories s 
+                   JOIN usuarios u ON s.usuario_id = u.id 
+                   WHERE s.activa = 1 AND s.fecha_creacion >= NOW() - INTERVAL 1 DAY 
+                   AND (s.usuario_id = ? OR s.usuario_id IN (SELECT seguido_id FROM seguidores WHERE seguidor_id = ?))
+                   AND s.usuario_id NOT IN (SELECT bloqueado_id FROM bloqueos WHERE bloqueador_id = ?)
+                   AND s.usuario_id NOT IN (SELECT bloqueador_id FROM bloqueos WHERE bloqueado_id = ?)
+                   ORDER BY s.fecha_creacion ASC`;
+        const [s] = await db.query(q, [miId, miId, miId, miId, miId]);
+        res.json(s.map(st => ({ ...st, media_url: arreglarUrl(st.media_url), avatar_url: arreglarUrl(st.avatar_url), la_he_visto: st.la_he_visto > 0 })));
+    } catch(e) {
+        console.error('🔥 Error obteniendo stories:', e);
+        res.status(500).json({ error: 'Error interno del servidor' });
+    }
 });
 
 app.post('/api/stories/:id/ver', verificarToken, async (req, res) => {
@@ -631,7 +729,10 @@ app.post('/api/stories/:id/ver', verificarToken, async (req, res) => {
             }
         }
         res.json({ mensaje: 'OK' });
-    } catch (e) { res.status(500).json({ error: 'Error' }); }
+    } catch (e) { 
+        console.error('🔥 Error registrando vista de story:', e);
+        res.status(500).json({ error: 'Error interno del servidor' }); 
+    }
 });
 
 app.post('/api/stories/:id/like', verificarToken, async (req, res) => {
@@ -643,7 +744,10 @@ app.post('/api/stories/:id/like', verificarToken, async (req, res) => {
             dispararPush(st[0].usuario_id, miId, 'like_story');
         }
         res.json({ success: true });
-    } catch (e) { res.status(500).json({ error: 'Error' }); }
+    } catch (e) { 
+        console.error('🔥 Error dando like a story:', e);
+        res.status(500).json({ error: 'Error interno del servidor' }); 
+    }
 });
 
 app.get('/api/stories/:id/vistas', verificarToken, async (req, res) => {
@@ -653,7 +757,10 @@ app.get('/api/stories/:id/vistas', verificarToken, async (req, res) => {
         if (st.length === 0 || st[0].usuario_id !== miId) return res.status(403).json({ error: 'No autorizado' });
         const [v] = await db.query(`SELECT u.id, u.username, u.avatar_url FROM visualizaciones_stories v JOIN usuarios u ON v.usuario_id = u.id WHERE v.story_id = ? AND u.id != ?`, [req.params.id, miId]);
         res.json(v.map(usr => ({ ...usr, avatar_url: arreglarUrl(usr.avatar_url) })));
-    } catch (e) { res.status(500).json({ error: 'Error' }); }
+    } catch (e) { 
+        console.error('🔥 Error obteniendo vistas de story:', e);
+        res.status(500).json({ error: 'Error interno del servidor' }); 
+    }
 });
 
 app.delete('/api/stories/:id', verificarToken, async (req, res) => {
@@ -662,42 +769,63 @@ app.delete('/api/stories/:id', verificarToken, async (req, res) => {
         if (r.affectedRows === 0) return res.status(403).json({ error: 'No autorizado' });
         io.emit('drop_agotado', { storyId: parseInt(req.params.id) });
         res.json({ mensaje: 'OK' });
-    } catch (e) { res.status(500).json({ error: 'Error' }); }
+    } catch (e) { 
+        console.error('🔥 Error borrando story:', e);
+        res.status(500).json({ error: 'Error interno del servidor' }); 
+    }
 });
 
 // ==========================================
 // RUTA: CONFIGURACIÓN CUENTA
 // ==========================================
 app.delete('/api/usuarios/me', verificarToken, async (req, res) => {
-    await db.query('DELETE FROM usuarios WHERE id = ?', [req.usuario.id]);
-    res.json({ mensaje: 'OK' });
+    try {
+        await db.query('DELETE FROM usuarios WHERE id = ?', [req.usuario.id]);
+        res.json({ mensaje: 'OK' });
+    } catch(e) {
+        console.error('🔥 Error borrando cuenta:', e);
+        res.status(500).json({ error: 'Error interno del servidor' });
+    }
 });
 app.put('/api/usuarios/me/username', verificarToken, async (req, res) => {
-    const [e] = await db.query('SELECT id FROM usuarios WHERE username = ? AND id != ?', [req.body.username, req.usuario.id]);
-    if (e.length > 0) return res.status(400).json({ error: 'En uso' });
-    await db.query('UPDATE usuarios SET username = ? WHERE id = ?', [req.body.username, req.usuario.id]);
-    res.json({ mensaje: 'OK' });
+    try {
+        const [e] = await db.query('SELECT id FROM usuarios WHERE username = ? AND id != ?', [req.body.username, req.usuario.id]);
+        if (e.length > 0) return res.status(400).json({ error: 'En uso' });
+        await db.query('UPDATE usuarios SET username = ? WHERE id = ?', [req.body.username, req.usuario.id]);
+        res.json({ mensaje: 'OK' });
+    } catch(e) {
+        console.error('🔥 Error editando username:', e);
+        res.status(500).json({ error: 'Error interno del servidor' });
+    }
 });
 app.put('/api/usuarios/me/email', verificarToken, async (req, res) => {
-    const [e] = await db.query('SELECT id FROM usuarios WHERE email = ? AND id != ?', [req.body.email, req.usuario.id]);
-    if (e.length > 0) return res.status(400).json({ error: 'En uso' });
-    await db.query('UPDATE usuarios SET email = ? WHERE id = ?', [req.body.email, req.usuario.id]);
-    res.json({ mensaje: 'OK' });
+    try {
+        const [e] = await db.query('SELECT id FROM usuarios WHERE email = ? AND id != ?', [req.body.email, req.usuario.id]);
+        if (e.length > 0) return res.status(400).json({ error: 'En uso' });
+        await db.query('UPDATE usuarios SET email = ? WHERE id = ?', [req.body.email, req.usuario.id]);
+        res.json({ mensaje: 'OK' });
+    } catch(e) {
+        console.error('🔥 Error editando email:', e);
+        res.status(500).json({ error: 'Error interno del servidor' });
+    }
 });
 app.put('/api/usuarios/me/password', verificarToken, async (req, res) => {
-    const [u] = await db.query('SELECT password FROM usuarios WHERE id = ?', [req.usuario.id]);
-    const ok = await bcrypt.compare(req.body.password_actual, u[0].password);
-    if (!ok) return res.status(401).json({ error: 'Incorrecta' });
-    const h = await bcrypt.hash(req.body.password_nueva, await bcrypt.genSalt(10));
-    await db.query('UPDATE usuarios SET password = ? WHERE id = ?', [h, req.usuario.id]);
-    res.json({ mensaje: 'OK' });
+    try {
+        const [u] = await db.query('SELECT password FROM usuarios WHERE id = ?', [req.usuario.id]);
+        const ok = await bcrypt.compare(req.body.password_actual, u[0].password);
+        if (!ok) return res.status(401).json({ error: 'Incorrecta' });
+        const h = await bcrypt.hash(req.body.password_nueva, await bcrypt.genSalt(10));
+        await db.query('UPDATE usuarios SET password = ? WHERE id = ?', [h, req.usuario.id]);
+        res.json({ mensaje: 'OK' });
+    } catch(e) {
+        console.error('🔥 Error editando password:', e);
+        res.status(500).json({ error: 'Error interno del servidor' });
+    }
 });
 
 // ==========================================
 // RUTAS: RECUPERACIÓN DE CONTRASEÑA
 // ==========================================
-
-// 1. Solicitar código de 6 dígitos
 app.post('/api/auth/forgot-password', async (req, res) => {
     const { email } = req.body;
     try {
@@ -711,7 +839,6 @@ app.post('/api/auth/forgot-password', async (req, res) => {
 
         console.log(`\n🔐 INTENTANDO ENVIAR CÓDIGO [${codigo}] a ${email} POR RESEND...`);
 
-        // 👇 DISPARAMOS EL CORREO POR API HTTPS (SIN BLOQUEOS) 👇
         const { data, error } = await resend.emails.send({
             from: 'Zync App <no-reply@zync-app.net>',
             to: email,
@@ -737,12 +864,11 @@ app.post('/api/auth/forgot-password', async (req, res) => {
         res.json({ mensaje: 'Código enviado correctamente' });
         
     } catch (error) {
-        console.error('Error del servidor:', error);
+        console.error('🔥 Error del servidor en forgot-password:', error);
         res.status(500).json({ error: 'Error interno del servidor' });
     }
 });
 
-// 2. Verificar si el código es correcto y no ha caducado
 app.post('/api/auth/verify-reset-code', async (req, res) => {
     const { email, codigo } = req.body;
     try {
@@ -758,28 +884,26 @@ app.post('/api/auth/verify-reset-code', async (req, res) => {
 
         res.json({ mensaje: 'Código válido' });
     } catch (error) {
+        console.error('🔥 Error en verify-reset-code:', error);
         res.status(500).json({ error: 'Error interno' });
     }
 });
 
-// 3. Cambiar la contraseña finalmente
 app.post('/api/auth/reset-password', async (req, res) => {
     const { email, codigo, nuevaPassword } = req.body;
     try {
-        // Volvemos a comprobar por seguridad extrema
         const [registro] = await db.query('SELECT * FROM recuperacion_passwords WHERE email = ? AND codigo = ? AND expira_en > NOW()', [email, codigo]);
         if (registro.length === 0) return res.status(400).json({ error: 'El código es inválido o ha caducado.' });
 
-        // Encriptar nueva contraseña
         const salt = await bcrypt.genSalt(10);
         const hashedPassword = await bcrypt.hash(nuevaPassword, salt);
 
-        // Actualizar contraseña y borrar el código
         await db.query('UPDATE usuarios SET password = ? WHERE email = ?', [hashedPassword, email]);
         await db.query('DELETE FROM recuperacion_passwords WHERE email = ?', [email]);
 
         res.json({ mensaje: 'Contraseña cambiada con éxito' });
     } catch (error) {
+        console.error('🔥 Error en reset-password:', error);
         res.status(500).json({ error: 'Error al cambiar contraseña' });
     }
 });
@@ -796,6 +920,7 @@ app.post('/api/reportar', verificarToken, async (req, res) => {
         );
         res.json({ mensaje: 'Reporte enviado con éxito. Nuestro equipo lo revisará.' });
     } catch (e) {
+        console.error('🔥 Error al reportar:', e);
         res.status(500).json({ error: 'Error al enviar el reporte' });
     }
 });
@@ -809,19 +934,16 @@ app.post('/api/usuarios/:id/bloquear', verificarToken, async (req, res) => {
         const [existe] = await db.query('SELECT id FROM bloqueos WHERE bloqueador_id = ? AND bloqueado_id = ?', [miId, targetId]);
         
         if (existe.length > 0) {
-            // Si ya lo tenía bloqueado, lo desbloqueamos
             await db.query('DELETE FROM bloqueos WHERE id = ?', [existe[0].id]);
             res.json({ bloqueado: false, mensaje: 'Usuario desbloqueado' });
         } else {
-            // Si no estaba bloqueado, lo bloqueamos
             await db.query('INSERT INTO bloqueos (bloqueador_id, bloqueado_id) VALUES (?, ?)', [miId, targetId]);
-            
-            // MAGIA EXTRA: Si se seguían mutuamente, al bloquearse se deja de seguir automáticamente
             await db.query('DELETE FROM seguidores WHERE (seguidor_id = ? AND seguido_id = ?) OR (seguidor_id = ? AND seguido_id = ?)', [miId, targetId, targetId, miId]);
             
             res.json({ bloqueado: true, mensaje: 'Usuario bloqueado' });
         }
     } catch (e) {
+        console.error('🔥 Error al bloquear:', e);
         res.status(500).json({ error: 'Error interno' });
     }
 });
