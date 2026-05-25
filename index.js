@@ -34,19 +34,12 @@ const server = http.createServer(app);
 const io = new Server(server, { cors: { origin: '*' } });
 const PORT = process.env.PORT || 3000;
 
-// ESTO DEBE SER LO PRIMERO
 app.use(cors({
     origin: ['https://www.zync-app.net', 'https://zync-app.net'],
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
-    credentials: true
-}));
-
-app.options('*', cors({
-    origin: ['https://www.zync-app.net', 'https://zync-app.net'],
-    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
-    credentials: true
+    credentials: true,
+    optionsSuccessStatus: 200 // Esto es importante para navegadores antiguos
 }));
 
 app.use(express.json());
