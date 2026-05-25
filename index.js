@@ -114,7 +114,8 @@ const arreglarUrl = (url) => {
 const formatearPost = (post) => ({
     ...post,
     avatar_url: arreglarUrl(post.avatar_url),
-    original_avatar_url: arreglarUrl(post.original_avatar_url)
+    original_avatar_url: arreglarUrl(post.original_avatar_url),
+    imagenes: post.imagenes ? post.imagenes.split(',').map(url => arreglarUrl(url)).join(',') : null
 });
 
 const baseQueryPublicaciones = `
