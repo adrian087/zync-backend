@@ -34,15 +34,15 @@ const server = http.createServer(app);
 const io = new Server(server, { cors: { origin: '*' } });
 const PORT = process.env.PORT || 3000;
 
-// Borra el app.use(cors()) que tengas y pon esto:
+// 1. Permite las peticiones normales de tu web
 app.use(cors({
     origin: ['https://www.zync-app.net', 'https://zync-app.net'],
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
-    credentials: true,
-    optionsSuccessStatus: 200
+    credentials: true
 }));
 
+// 2. Permite explícitamente las peticiones "pre-flight" (las que causaban el error)
 app.options('*', cors({
     origin: ['https://www.zync-app.net', 'https://zync-app.net'],
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
