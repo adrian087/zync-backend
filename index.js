@@ -425,6 +425,25 @@ app.get('/api/publicaciones/:id/comentarios', verificarToken, async (req, res) =
     }
 });
 
+// Borrar comentario
+app.delete('/api/comentarios/:id', verificarToken, async (req, res) => {
+    try {
+        const comentarioId = req.params.id;
+        const usuarioId = req.usuario.id;
+
+        // Comprobamos si el comentario existe y si es tuyo
+        const [comentario] = await db.query('SELECT * FROM comentarios WHERE id = ?', [comentarioId]);
+        
+        if (comentario.length === 0) return res.status(404).json({ error: 'Comentario no encontrado' });
+        if (comentario[0].usuario_id !== usuarioId) return res.status(403).json({ error: 'No autorizado' });
+
+        await db.query('DELETE FROM comentarios WHERE id = ?', [comentarioId]);
+        res.json({ message: 'Comentario eliminado' });
+    } catch (error) {
+        res.status(500).json({ error: 'Error al eliminar el comentario' });
+    }
+});
+
 // ==========================================
 // RUTAS: GUARDADOS Y BÚSQUEDAS
 // ==========================================
