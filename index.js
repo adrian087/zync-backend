@@ -14,9 +14,8 @@ const path = require('path');
 const { Resend } = require('resend');
 const resend = new Resend(process.env.RESEND_API_KEY);
 
-// ==========================================
-// 1. INICIALIZAMOS FIREBASE ADMIN SDK ☁️
-// ==========================================
+
+// 1. INICIALIZAMOS FIREBASE ADMIN SDK 
 const admin = require('firebase-admin');
 let serviceAccount;
 try {
@@ -34,19 +33,15 @@ const server = http.createServer(app);
 const io = new Server(server, { cors: { origin: '*' } });
 const PORT = process.env.PORT || 3000;
 
-// ✅ Reemplaza tu bloque app.use(cors({...})) por este:
-
 const allowedOrigins = [
     'https://www.zync-app.net',
     'https://zync-app.net',
-    // ✅ Localhost para desarrollo (cualquier puerto)
     /^http:\/\/localhost(:\d+)?$/,
     /^http:\/\/127\.0\.0\.1(:\d+)?$/,
 ];
 
 app.use(cors({
     origin: function (origin, callback) {
-        // Permitir peticiones sin origin (móvil, Postman, curl)
         if (!origin) return callback(null, true);
 
         const permitido = allowedOrigins.some(o =>
@@ -70,7 +65,6 @@ app.use(express.json());
 // CONFIGURACIÓN ESTÁTICOS Y CACHÉ
 app.use('/uploads', express.static('uploads', {
     setHeaders: (res, path, stat) => {
-        // 👇 Esto obliga al navegador a NO cachear la imagen si no es necesario
         res.set('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
         res.set('Pragma', 'no-cache');
         res.set('Expires', '0');
@@ -90,23 +84,19 @@ io.on('connection', (socket) => {
     socket.on('disconnect', () => console.log('🔌 Usuario desconectado del túnel'));
 });
 
-// ==========================================
-// 🚀 CAÑÓN DE NOTIFICACIONES PUSH REALES
-// ==========================================
+
+// NOTIFICACIONES PUSH REALES
 async function dispararPush(destinoId, origenId, tipo) {
     try {
         if (!admin.apps.length) return;
 
-        // Buscamos la "matrícula" del móvil del usuario destino
         const [destinos] = await db.query('SELECT fcm_token FROM usuarios WHERE id = ?', [destinoId]);
         const fcmToken = destinos[0]?.fcm_token;
         if (!fcmToken) return;
 
-        // Buscamos el nombre del usuario que hace la acción
         const [origenes] = await db.query('SELECT username FROM usuarios WHERE id = ?', [origenId]);
         const origenUsername = origenes[0]?.username || 'Alguien';
 
-        // Montamos el mensaje
         let titulo = 'Zync';
         let cuerpo = '';
 
@@ -126,15 +116,13 @@ async function dispararPush(destinoId, origenId, tipo) {
         };
 
         await admin.messaging().send(mensaje);
-        console.log(`✅ Push enviado con éxito a @${origenUsername} -> [${tipo}]`);
+        console.log(`Push enviado con éxito a @${origenUsername} -> [${tipo}]`);
     } catch (e) {
-        console.error('❌ Error disparando Push FCM:', e);
+        console.error('Error disparando Push FCM:', e);
     }
 }
 
-// ==========================================
-// 🧠 UTILIDADES Y FORMATEADORES
-// ==========================================
+// UTILIDADES Y FORMATEADORES
 const arreglarUrl = (url) => {
     if (!url) return null;
     if (url.startsWith('http')) return url;
@@ -166,12 +154,10 @@ const baseQueryPublicaciones = `
 `;
 
 app.get('/', (req, res) => res.json({ mensaje: 'Servidor funcionando 🚀' }));
-server.listen(PORT, () => console.log(`✅ Servidor en puerto ${PORT}`));
+server.listen(PORT, () => console.log(`Servidor en puerto ${PORT}`));
 
-// ==========================================
+
 // RUTA: REGISTRO Y LOGIN (Auth)
-// ==========================================
-
 app.post('/api/registro', async (req, res) => {
     const { nombres, apellidos, username, email, password } = req.body;
     if (!nombres || !apellidos || !username || !email || !password) return res.status(400).json({ error: 'Faltan datos obligatorios' });
@@ -197,13 +183,13 @@ app.post('/api/registro', async (req, res) => {
                     <p style="color: #999; font-size: 12px; text-align: center;">Si tienes alguna duda, estamos aquí para ayudarte.</p>
                 </div>
             `
-        }).then(() => console.log(`✉️ Correo de bienvenida enviado a @${username}`))
-            .catch(err => console.error('❌ Error enviando bienvenida:', err));
+        }).then(() => console.log(`Correo de bienvenida enviado a @${username}`))
+            .catch(err => console.error('Error enviando bienvenida:', err));
 
         res.status(201).json({ mensaje: 'OK', usuarioId: r.insertId });
     } catch (e) {
         if (e.code === 'ER_DUP_ENTRY') return res.status(409).json({ error: 'El usuario ya existe' });
-        console.error('🔥 Error en registro:', e);
+        console.error('Error en registro:', e);
         res.status(500).json({ error: 'Error interno del servidor' });
     }
 });
@@ -226,7 +212,7 @@ app.post('/api/login', async (req, res) => {
         const token = jwt.sign({ id: u[0].id }, process.env.JWT_SECRET, { expiresIn: '7d' });
         res.json({ token, usuario: { id: u[0].id, username: u[0].username } });
     } catch (e) {
-        console.error('🔥 Error en login:', e);
+        console.error('Error en login:', e);
         res.status(500).json({ error: 'Error interno del servidor' });
     }
 });
@@ -263,14 +249,12 @@ app.post('/api/auth/google', async (req, res) => {
         const token = jwt.sign({ id: usuario.id }, process.env.JWT_SECRET, { expiresIn: '7d' });
         res.json({ token, usuario });
     } catch (e) {
-        console.error('🔥 Error en auth google:', e);
+        console.error('Error en auth google:', e);
         res.status(500).json({ error: 'Error interno del servidor' });
     }
 });
 
-// ==========================================
 // RUTAS: PUBLICACIONES BASE
-// ==========================================
 app.post('/api/publicaciones', verificarToken, upload.array('imagenes', 4), async (req, res) => {
     const { contenido } = req.body;
     try {
@@ -280,7 +264,7 @@ app.post('/api/publicaciones', verificarToken, upload.array('imagenes', 4), asyn
         }
         res.status(201).json({ mensaje: 'OK' });
     } catch (e) {
-        console.error('🔥 Error subiendo publicacion:', e);
+        console.error('Error subiendo publicacion:', e);
         res.status(500).json({ error: 'Error interno del servidor' });
     }
 });
@@ -298,7 +282,7 @@ app.get('/api/publicaciones', verificarToken, async (req, res) => {
         const [p] = await db.query(query, [miId, miId, miId, miId, miId, miId, miId, limit, offset]);
         res.json(p.map(formatearPost));
     } catch (e) {
-        console.error('🔥 Error obteniendo muro:', e);
+        console.error('Error obteniendo muro:', e);
         res.status(500).json({ error: 'Error interno del servidor' });
     }
 });
@@ -317,7 +301,7 @@ app.get('/api/publicaciones/siguiendo', verificarToken, async (req, res) => {
         const [p] = await db.query(query, [miId, miId, miId, miId, miId, miId, limit, offset]);
         res.json(p.map(formatearPost));
     } catch (e) {
-        console.error('🔥 Error obteniendo feed siguiendo:', e);
+        console.error('Error obteniendo feed siguiendo:', e);
         res.status(500).json({ error: 'Error interno del servidor' });
     }
 });
@@ -328,7 +312,7 @@ app.delete('/api/publicaciones/:id', verificarToken, async (req, res) => {
         if (r.affectedRows === 0) return res.status(403).json({ error: 'No autorizado' });
         res.json({ mensaje: 'Eliminada' });
     } catch (e) {
-        console.error('🔥 Error borrando post:', e);
+        console.error('Error borrando post:', e);
         res.status(500).json({ error: 'Error interno del servidor' });
     }
 });
@@ -340,14 +324,12 @@ app.put('/api/publicaciones/:id', verificarToken, async (req, res) => {
         if (r.affectedRows === 0) return res.status(403).json({ error: 'No autorizado' });
         res.json({ mensaje: 'Actualizada' });
     } catch (e) {
-        console.error('🔥 Error actualizando post:', e);
+        console.error('Error actualizando post:', e);
         res.status(500).json({ error: 'Error interno del servidor' });
     }
 });
 
-// ==========================================
 // RUTAS: INTERACCIONES Y PUSH (Likes, Comentarios, ReZyncs)
-// ==========================================
 app.post('/api/publicaciones/:id/rezync', verificarToken, async (req, res) => {
     const miId = req.usuario.id;
     try {
@@ -376,7 +358,7 @@ app.post('/api/publicaciones/:id/rezync', verificarToken, async (req, res) => {
         io.emit('actualizacion_rezync', { publicacionId: parseInt(originalId), total_rezyncs: c[0].total });
         res.json({ rezynceado });
     } catch (e) {
-        console.error('🔥 Error en rezync:', e);
+        console.error('Error en rezync:', e);
         res.status(500).json({ error: 'Error interno del servidor' });
     }
 });
@@ -409,7 +391,7 @@ app.post('/api/publicaciones/:id/like', verificarToken, async (req, res) => {
         io.emit('actualizacion_like', { publicacionId: parseInt(targetId), total_likes: c[0].total });
         return res.json({ liked });
     } catch (e) {
-        console.error('🔥 Error en like:', e);
+        console.error('Error en like:', e);
         res.status(500).json({ error: 'Error interno del servidor' });
     }
 });
@@ -431,7 +413,7 @@ app.post('/api/publicaciones/:id/comentarios', verificarToken, async (req, res) 
         }
         res.status(201).json({ mensaje: 'Comentado' });
     } catch (e) {
-        console.error('🔥 Error comentando:', e);
+        console.error('Error comentando:', e);
         res.status(500).json({ error: 'Error interno del servidor' });
     }
 });
@@ -443,7 +425,7 @@ app.get('/api/publicaciones/:id/comentarios', verificarToken, async (req, res) =
         const [c] = await db.query(`SELECT c.id, c.usuario_id, c.contenido, c.fecha_creacion, c.comentario_padre_id, u.username, u.avatar_url FROM comentarios c JOIN usuarios u ON c.usuario_id = u.id WHERE c.publicacion_id = ? ORDER BY c.fecha_creacion ASC`, [targetId]);
         res.json(c.map(formatearPost));
     } catch (e) {
-        console.error('🔥 Error obteniendo comentarios:', e);
+        console.error('Error obteniendo comentarios:', e);
         res.status(500).json({ error: 'Error interno del servidor' });
     }
 });
@@ -454,7 +436,6 @@ app.delete('/api/comentarios/:id', verificarToken, async (req, res) => {
         const comentarioId = req.params.id;
         const usuarioId = req.usuario.id;
 
-        // Comprobamos si el comentario existe y si es tuyo
         const [comentario] = await db.query('SELECT * FROM comentarios WHERE id = ?', [comentarioId]);
 
         if (comentario.length === 0) return res.status(404).json({ error: 'Comentario no encontrado' });
@@ -467,9 +448,7 @@ app.delete('/api/comentarios/:id', verificarToken, async (req, res) => {
     }
 });
 
-// ==========================================
 // RUTAS: GUARDADOS Y BÚSQUEDAS
-// ==========================================
 app.post('/api/publicaciones/:id/guardar', verificarToken, async (req, res) => {
     const miId = req.usuario.id;
     try {
@@ -482,7 +461,7 @@ app.post('/api/publicaciones/:id/guardar', verificarToken, async (req, res) => {
         else { await db.query('INSERT INTO guardados (usuario_id, publicacion_id) VALUES (?, ?)', [miId, targetId]); guardado = true; }
         res.json({ guardado });
     } catch (e) {
-        console.error('🔥 Error en guardar post:', e);
+        console.error('Error en guardar post:', e);
         res.status(500).json({ error: 'Error interno del servidor' });
     }
 });
@@ -494,7 +473,7 @@ app.get('/api/publicaciones/guardadas', verificarToken, async (req, res) => {
         const [p] = await db.query(q, [miId, miId, miId, miId]);
         res.json(p.map(formatearPost));
     } catch (e) {
-        console.error('🔥 Error obteniendo guardados:', e);
+        console.error('Error obteniendo guardados:', e);
         res.status(500).json({ error: 'Error interno del servidor' });
     }
 });
@@ -512,7 +491,7 @@ app.get('/api/publicaciones/buscar', verificarToken, async (req, res) => {
         const [p] = await db.query(q, [miId, miId, miId, `%${req.query.q}%`, `%${req.query.q}%`, miId, miId]);
         res.json(p.map(formatearPost));
     } catch (e) {
-        console.error('🔥 Error buscando publicaciones:', e);
+        console.error('Error buscando publicaciones:', e);
         res.status(500).json({ error: 'Error interno del servidor' });
     }
 });
@@ -537,14 +516,12 @@ app.get('/api/usuarios/buscar', verificarToken, async (req, res) => {
 
         res.json(usuarios.map(u => ({ ...u, avatar_url: arreglarUrl(u.avatar_url) })));
     } catch (e) {
-        console.error('🔥 Error buscando usuarios:', e);
+        console.error('Error buscando usuarios:', e);
         res.status(500).json({ error: 'Error interno del servidor' });
     }
 });
 
-// ==========================================
 // RUTAS: PERFILES Y SEGUIR
-// ==========================================
 app.get('/api/perfil', verificarToken, async (req, res) => {
     const miId = req.usuario.id;
     try {
@@ -552,7 +529,7 @@ app.get('/api/perfil', verificarToken, async (req, res) => {
         const [p] = await db.query(baseQueryPublicaciones + ' WHERE p.usuario_id = ? ORDER BY p.fecha_creacion DESC', [miId, miId, miId, miId]);
         res.json({ username: u[0].username, bio: u[0].bio, avatar_url: arreglarUrl(u[0].avatar_url), totalPosts: p.length, publicaciones: p.map(formatearPost) });
     } catch (e) {
-        console.error('🔥 Error cargando mi perfil:', e);
+        console.error('Error cargando mi perfil:', e);
         res.status(500).json({ error: 'Error interno del servidor' });
     }
 });
@@ -572,7 +549,7 @@ app.put('/api/perfil/editar', verificarToken, upload.single('avatar'), async (re
         await db.query(q, vals);
         res.json({ mensaje: 'OK' });
     } catch (e) {
-        console.error('🔥 Error editando perfil:', e);
+        console.error('Error editando perfil:', e);
         res.status(500).json({ error: 'Error interno del servidor' });
     }
 });
@@ -589,7 +566,7 @@ app.get('/api/usuarios/bloqueados', verificarToken, async (req, res) => {
         );
         res.json(b.map(u => ({ ...u, avatar_url: arreglarUrl(u.avatar_url) })));
     } catch (e) {
-        console.error('🔥 Error obteniendo bloqueados:', e);
+        console.error('Error obteniendo bloqueados:', e);
         res.status(500).json({ error: 'Error al obtener la lista de bloqueados' });
     }
 });
@@ -615,7 +592,7 @@ app.get('/api/usuarios/:id', verificarToken, async (req, res) => {
             publicaciones: p.map(formatearPost)
         });
     } catch (e) {
-        console.error('🔥 Error cargando perfil ajeno:', e);
+        console.error('Error cargando perfil ajeno:', e);
         res.status(500).json({ error: 'Error interno del servidor' });
     }
 });
@@ -635,14 +612,12 @@ app.post('/api/usuarios/:id/seguir', verificarToken, async (req, res) => {
             res.json({ siguiendo: true });
         }
     } catch (e) {
-        console.error('🔥 Error siguiendo usuario:', e);
+        console.error('Error siguiendo usuario:', e);
         res.status(500).json({ error: 'Error interno del servidor' });
     }
 });
 
-// ==========================================
 // RUTAS: MENSAJES Y CHATS
-// ==========================================
 app.get('/api/mensajes/chats', verificarToken, async (req, res) => {
     const miId = req.usuario.id;
     try {
@@ -653,7 +628,7 @@ app.get('/api/mensajes/chats', verificarToken, async (req, res) => {
         const [c] = await db.query(q, [miId, miId, miId, miId, miId]);
         res.json(c.map(chat => ({ ...chat, avatar_url: arreglarUrl(chat.avatar_url) })));
     } catch (e) {
-        console.error('🔥 Error cargando chats:', e);
+        console.error('Error cargando chats:', e);
         res.status(500).json({ error: 'Error interno del servidor' });
     }
 });
@@ -665,7 +640,7 @@ app.get('/api/mensajes/:otroUsuarioId', verificarToken, async (req, res) => {
         const [m] = await db.query(`SELECT m.*, u.username as remitente_username FROM mensajes m JOIN usuarios u ON m.remitente_id = u.id WHERE (m.remitente_id = ? AND m.destinatario_id = ?) OR (m.remitente_id = ? AND m.destinatario_id = ?) ORDER BY m.fecha_envio ASC`, [miId, otroId, otroId, miId]);
         res.json(m);
     } catch (e) {
-        console.error('🔥 Error cargando mensajes:', e);
+        console.error('Error cargando mensajes:', e);
         res.status(500).json({ error: 'Error interno del servidor' });
     }
 });
@@ -680,20 +655,18 @@ app.post('/api/mensajes/:otroUsuarioId', verificarToken, async (req, res) => {
         dispararPush(otroId, miId, 'mensaje');
         res.status(201).json(m[0]);
     } catch (e) {
-        console.error('🔥 Error enviando mensaje:', e);
+        console.error('Error enviando mensaje:', e);
         res.status(500).json({ error: 'Error interno del servidor' });
     }
 });
 
-// ==========================================
 // RUTAS: NOTIFICACIONES, BADGES Y FCM
-// ==========================================
 app.put('/api/usuarios/fcm-token', verificarToken, async (req, res) => {
     try {
         await db.query('UPDATE usuarios SET fcm_token = ? WHERE id = ?', [req.body.fcm_token, req.usuario.id]);
         res.json({ mensaje: 'OK' });
     } catch (e) {
-        console.error('🔥 Error guardando fcm_token:', e);
+        console.error('Error guardando fcm_token:', e);
         res.status(500).json({ error: 'Error interno del servidor' });
     }
 });
@@ -705,7 +678,7 @@ app.get('/api/badges', verificarToken, async (req, res) => {
         const [m] = await db.query('SELECT COUNT(*) as t FROM mensajes WHERE destinatario_id = ? AND leido = 0', [miId]);
         res.json({ notificaciones: n[0].t, mensajes: m[0].t });
     } catch (e) {
-        console.error('🔥 Error obteniendo badges:', e);
+        console.error('Error obteniendo badges:', e);
         res.status(500).json({ error: 'Error interno del servidor' });
     }
 });
@@ -717,7 +690,7 @@ app.get('/api/notificaciones', verificarToken, async (req, res) => {
         const [n] = await db.query(q, [miId, limit, offset]);
         res.json(n.map(noti => ({ ...noti, origen_avatar: arreglarUrl(noti.origen_avatar) })));
     } catch (e) {
-        console.error('🔥 Error obteniendo notificaciones:', e);
+        console.error('Error obteniendo notificaciones:', e);
         res.status(500).json({ error: 'Error interno del servidor' });
     }
 });
@@ -727,14 +700,12 @@ app.put('/api/notificaciones/leidas', verificarToken, async (req, res) => {
         await db.query('UPDATE notificaciones SET leida = 1 WHERE usuario_destino_id = ? AND leida = 0', [req.usuario.id]);
         res.json({ success: true });
     } catch (e) {
-        console.error('🔥 Error marcando notificaciones leídas:', e);
+        console.error('Error marcando notificaciones leídas:', e);
         res.status(500).json({ error: 'Error interno del servidor' });
     }
 });
 
-// ==========================================
 // RUTAS: STORIES Y ZYNC DROPS
-// ==========================================
 app.post('/api/stories', verificarToken, upload.single('media'), async (req, res) => {
     const { tipo, max_visualizaciones } = req.body;
     try {
@@ -742,7 +713,7 @@ app.post('/api/stories', verificarToken, upload.single('media'), async (req, res
         const [r] = await db.query('INSERT INTO stories (usuario_id, media_url, tipo, max_visualizaciones) VALUES (?, ?, ?, ?)', [req.usuario.id, `/uploads/${req.file.filename}`, tipo || 'normal', m]);
         res.status(201).json({ storyId: r.insertId });
     } catch (e) {
-        console.error('🔥 Error subiendo story:', e);
+        console.error('Error subiendo story:', e);
         res.status(500).json({ error: 'Error interno del servidor' });
     }
 });
@@ -761,7 +732,7 @@ app.get('/api/stories', verificarToken, async (req, res) => {
         const [s] = await db.query(q, [miId, miId, miId, miId, miId]);
         res.json(s.map(st => ({ ...st, media_url: arreglarUrl(st.media_url), avatar_url: arreglarUrl(st.avatar_url), la_he_visto: st.la_he_visto > 0 })));
     } catch (e) {
-        console.error('🔥 Error obteniendo stories:', e);
+        console.error('Error obteniendo stories:', e);
         res.status(500).json({ error: 'Error interno del servidor' });
     }
 });
@@ -780,7 +751,7 @@ app.post('/api/stories/:id/ver', verificarToken, async (req, res) => {
         }
         res.json({ mensaje: 'OK' });
     } catch (e) {
-        console.error('🔥 Error registrando vista de story:', e);
+        console.error('Error registrando vista de story:', e);
         res.status(500).json({ error: 'Error interno del servidor' });
     }
 });
@@ -795,7 +766,7 @@ app.post('/api/stories/:id/like', verificarToken, async (req, res) => {
         }
         res.json({ success: true });
     } catch (e) {
-        console.error('🔥 Error dando like a story:', e);
+        console.error('Error dando like a story:', e);
         res.status(500).json({ error: 'Error interno del servidor' });
     }
 });
@@ -808,7 +779,7 @@ app.get('/api/stories/:id/vistas', verificarToken, async (req, res) => {
         const [v] = await db.query(`SELECT u.id, u.username, u.avatar_url FROM visualizaciones_stories v JOIN usuarios u ON v.usuario_id = u.id WHERE v.story_id = ? AND u.id != ?`, [req.params.id, miId]);
         res.json(v.map(usr => ({ ...usr, avatar_url: arreglarUrl(usr.avatar_url) })));
     } catch (e) {
-        console.error('🔥 Error obteniendo vistas de story:', e);
+        console.error('Error obteniendo vistas de story:', e);
         res.status(500).json({ error: 'Error interno del servidor' });
     }
 });
@@ -820,20 +791,18 @@ app.delete('/api/stories/:id', verificarToken, async (req, res) => {
         io.emit('drop_agotado', { storyId: parseInt(req.params.id) });
         res.json({ mensaje: 'OK' });
     } catch (e) {
-        console.error('🔥 Error borrando story:', e);
+        console.error('Error borrando story:', e);
         res.status(500).json({ error: 'Error interno del servidor' });
     }
 });
 
-// ==========================================
 // RUTA: CONFIGURACIÓN CUENTA
-// ==========================================
 app.delete('/api/usuarios/me', verificarToken, async (req, res) => {
     try {
         await db.query('DELETE FROM usuarios WHERE id = ?', [req.usuario.id]);
         res.json({ mensaje: 'OK' });
     } catch (e) {
-        console.error('🔥 Error borrando cuenta:', e);
+        console.error('Error borrando cuenta:', e);
         res.status(500).json({ error: 'Error interno del servidor' });
     }
 });
@@ -844,7 +813,7 @@ app.put('/api/usuarios/me/username', verificarToken, async (req, res) => {
         await db.query('UPDATE usuarios SET username = ? WHERE id = ?', [req.body.username, req.usuario.id]);
         res.json({ mensaje: 'OK' });
     } catch (e) {
-        console.error('🔥 Error editando username:', e);
+        console.error('Error editando username:', e);
         res.status(500).json({ error: 'Error interno del servidor' });
     }
 });
@@ -855,7 +824,7 @@ app.put('/api/usuarios/me/email', verificarToken, async (req, res) => {
         await db.query('UPDATE usuarios SET email = ? WHERE id = ?', [req.body.email, req.usuario.id]);
         res.json({ mensaje: 'OK' });
     } catch (e) {
-        console.error('🔥 Error editando email:', e);
+        console.error('Error editando email:', e);
         res.status(500).json({ error: 'Error interno del servidor' });
     }
 });
@@ -868,14 +837,12 @@ app.put('/api/usuarios/me/password', verificarToken, async (req, res) => {
         await db.query('UPDATE usuarios SET password = ? WHERE id = ?', [h, req.usuario.id]);
         res.json({ mensaje: 'OK' });
     } catch (e) {
-        console.error('🔥 Error editando password:', e);
+        console.error('Error editando password:', e);
         res.status(500).json({ error: 'Error interno del servidor' });
     }
 });
 
-// ==========================================
 // RUTAS: RECUPERACIÓN DE CONTRASEÑA
-// ==========================================
 app.post('/api/auth/forgot-password', async (req, res) => {
     const { email } = req.body;
     try {
@@ -887,7 +854,7 @@ app.post('/api/auth/forgot-password', async (req, res) => {
         await db.query('DELETE FROM recuperacion_passwords WHERE email = ?', [email]);
         await db.query('INSERT INTO recuperacion_passwords (email, codigo, expira_en) VALUES (?, ?, DATE_ADD(NOW(), INTERVAL 5 MINUTE))', [email, codigo]);
 
-        console.log(`\n🔐 INTENTANDO ENVIAR CÓDIGO [${codigo}] a ${email} POR RESEND...`);
+        console.log(`\nINTENTANDO ENVIAR CÓDIGO [${codigo}] a ${email} POR RESEND...`);
 
         const { data, error } = await resend.emails.send({
             from: 'Zync App <no-reply@zync-app.net>',
@@ -914,7 +881,7 @@ app.post('/api/auth/forgot-password', async (req, res) => {
         res.json({ mensaje: 'Código enviado correctamente' });
 
     } catch (error) {
-        console.error('🔥 Error del servidor en forgot-password:', error);
+        console.error('Error del servidor en forgot-password:', error);
         res.status(500).json({ error: 'Error interno del servidor' });
     }
 });
@@ -934,7 +901,7 @@ app.post('/api/auth/verify-reset-code', async (req, res) => {
 
         res.json({ mensaje: 'Código válido' });
     } catch (error) {
-        console.error('🔥 Error en verify-reset-code:', error);
+        console.error('Error en verify-reset-code:', error);
         res.status(500).json({ error: 'Error interno' });
     }
 });
@@ -953,14 +920,12 @@ app.post('/api/auth/reset-password', async (req, res) => {
 
         res.json({ mensaje: 'Contraseña cambiada con éxito' });
     } catch (error) {
-        console.error('🔥 Error en reset-password:', error);
+        console.error('Error en reset-password:', error);
         res.status(500).json({ error: 'Error al cambiar contraseña' });
     }
 });
 
-// ==========================================
 // RUTAS: MODERACIÓN (Reportes y Bloqueos)
-// ==========================================
 app.post('/api/reportar', verificarToken, async (req, res) => {
     const { usuario_destino_id, publicacion_id, motivo } = req.body;
     try {
@@ -970,7 +935,7 @@ app.post('/api/reportar', verificarToken, async (req, res) => {
         );
         res.json({ mensaje: 'Reporte enviado con éxito. Nuestro equipo lo revisará.' });
     } catch (e) {
-        console.error('🔥 Error al reportar:', e);
+        console.error('Error al reportar:', e);
         res.status(500).json({ error: 'Error al enviar el reporte' });
     }
 });
@@ -993,7 +958,7 @@ app.post('/api/usuarios/:id/bloquear', verificarToken, async (req, res) => {
             res.json({ bloqueado: true, mensaje: 'Usuario bloqueado' });
         }
     } catch (e) {
-        console.error('🔥 Error al bloquear:', e);
+        console.error('Error al bloquear:', e);
         res.status(500).json({ error: 'Error interno' });
     }
 });
