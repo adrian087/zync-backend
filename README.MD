@@ -261,7 +261,7 @@ Su uso, modificación y distribución quedan sujetos a la licencia especificada 
 
 ## 👨‍💻 Autor
 
-**Tu Nombre**
+**Adrián Torres Cañete**
 
 TFG — Desarrollo de Aplicaciones Multiplataforma (DAM)
 
